@@ -1,0 +1,25 @@
+{
+  "name": "webg-local",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "THIRD_PARTY_NOTICES.md"],
+  "scripts": {
+    "build": "tsc --noEmit && node scripts/build.mjs && tsc --declaration --emitDeclarationOnly --noEmit false --outDir dist",
+    "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "verify:model": "node scripts/verify-model.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.30.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3"
+  }
+}

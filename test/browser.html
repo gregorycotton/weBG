@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>weBG browser smoke check</title>
+<button id="run">Run local inference check</button>
+<pre id="result">Ready</pre>
+<script type="module">
+  import { createSegmenter } from "/dist/index.js";
+
+  document.querySelector("#run").onclick = async () => {
+    const result = document.querySelector("#result");
+    result.textContent = "Running…";
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 2;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "black"; context.fillRect(0, 0, 1, 1);
+    context.fillStyle = "white"; context.fillRect(1, 0, 1, 1);
+    const image = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+    const segmenter = createSegmenter({ model: {
+      id: "test-channel-mean", url: "/test/mean.onnx", inputName: "input_image", outputName: "mask",
+      inputWidth: 2, inputHeight: 2, mean: [0, 0, 0], std: [1, 1, 1], output: "probabilities"
+    } });
+    try {
+      const mask = await segmenter.segment(image, stage => { result.textContent = stage; });
+      if (String(mask.data) !== "0,255,255,255" || mask.sourceWidth !== 2 || mask.sourceHeight !== 2) throw new Error(`Unexpected result: ${[...mask.data]}`);
+      const again = await segmenter.segment(image);
+      if (String(again.data) !== String(mask.data)) throw new Error("Repeated inference changed the mask");
+      result.textContent = `PASS: repeated local WASM inference produced [${[...mask.data]}]`;
+    } catch (error) {
+      result.textContent = `FAIL: ${error.stack || error}`;
+      throw error;
+    } finally { segmenter.dispose(); }
+  };
+</script>

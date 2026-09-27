@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>weBG subject model check</title>
+<label>Image <input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label>
+<button id="run">Run self-hosted subject model</button>
+<pre id="result">Ready</pre>
+<canvas id="preview" width="512" height="512" style="background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 24px 24px"></canvas>
+<script type="module">
+  import { createSegmenter } from "/dist/index.js";
+
+  let segmenter;
+  document.querySelector("#run").onclick = async () => {
+    const result = document.querySelector("#result");
+    const preview = document.querySelector("#preview");
+    result.textContent = "Preparing…";
+    const manifest = await fetch("/models/birefnet-lite-512.json").then(response => response.json());
+    const chosen = document.querySelector("#image").files?.[0];
+    let image = chosen;
+    if (!image) {
+      const sample = document.createElement("canvas");
+      sample.width = 256; sample.height = 256;
+      const context = sample.getContext("2d");
+      context.fillStyle = "#f0e8d8"; context.fillRect(0, 0, 256, 256);
+      context.fillStyle = "#304b79"; context.beginPath(); context.ellipse(128, 135, 68, 92, 0, 0, Math.PI * 2); context.fill();
+      image = await new Promise(resolve => sample.toBlob(resolve, "image/png"));
+    }
+    segmenter ??= createSegmenter({ model: manifest.runtime });
+    const start = performance.now();
+    try {
+      const mask = await segmenter.segment(image, stage => { result.textContent = stage; });
+      if (mask.data.length !== 512 * 512 || mask.sourceWidth <= 0 || mask.sourceHeight <= 0) throw new Error("Invalid mask metadata");
+      const maskCanvas = document.createElement("canvas");
+      maskCanvas.width = mask.width; maskCanvas.height = mask.height;
+      const maskContext = maskCanvas.getContext("2d");
+      const pixels = maskContext.createImageData(mask.width, mask.height);
+      for (let i = 0; i < mask.data.length; i++) {
+        pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = 255;
+        pixels.data[i * 4 + 3] = mask.data[i];
+      }
+      maskContext.putImageData(pixels, 0, 0);
+      const context = preview.getContext("2d");
+      context.clearRect(0, 0, 512, 512);
+      const bitmap = await createImageBitmap(image, { resizeWidth: 512, resizeHeight: 512 });
+      context.drawImage(bitmap, 0, 0, 512, 512); bitmap.close();
+      context.globalCompositeOperation = "destination-in";
+      context.drawImage(maskCanvas, 0, 0, 512, 512);
+      context.globalCompositeOperation = "source-over";
+      result.textContent = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; ${Math.round(performance.now() - start)} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
+    } catch (error) {
+      result.textContent = `FAIL: ${error.stack || error}`;
+      throw error;
+    }
+  };
+  window.addEventListener("pagehide", () => segmenter?.dispose());
+</script>
