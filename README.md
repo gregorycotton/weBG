@@ -6,7 +6,7 @@ The reference backend is single-threaded ONNX Runtime Web WASM. The runtime and 
 
 ## Current status
 
-- Working browser path: decode JPEG, PNG, or WebP; resize to the model's fixed input; run WASM inference; return a soft alpha mask and subject bounds in source coordinates.
+- Working browser path: inspect JPEG, PNG, or WebP dimensions before decode; resize to the model's fixed input; run WASM inference; return a soft alpha mask and subject bounds in source coordinates. An optional PNG export applies the mask to the original image.
 - Initial model candidate: our 512 × 512 FP32 ONNX export of the official BiRefNet_lite weights. The model is **183,755,169 bytes**; the mask is **262,144 bytes** before any storage compression.
 - `models/birefnet-lite-512.json` records the source revision, upstream and exported SHA-256 hashes, license, export method, tool versions, tensor shapes, and validation errors. The `.onnx` file is deliberately excluded from Git and from the npm package; host it as a separate static asset.
 - This is a functional baseline, not yet a qualified replacement for every IMG.LY image. Hair, translucent edges, varied photos, browsers, and memory pressure still need comparative testing.
@@ -39,14 +39,15 @@ try {
   // mask.data: row-major Uint8Array of soft alpha, mask.width × mask.height.
   // mask.sourceWidth/sourceHeight: original decoded image dimensions.
   // mask.subjectBounds: source-coordinate rectangle; empty means no subject.
+  const pngBlob = await segmenter.exportCutout(imageBlob, mask);
 } finally {
   segmenter.dispose();
 }
 ```
 
-Reuse one segmenter for multiple images to reuse its loaded session. Only one operation may run on a segmenter at a time; a concurrent call rejects. `initialize()` can preload the model. `dispose()` terminates its worker and rejects in-flight work. The default input limits are 25 MiB compressed and 40 million decoded pixels; pass `maxInputBytes` or `maxInputPixels` to tighten them. Model files must be same-origin.
+Reuse one segmenter for multiple images to reuse its loaded session. Only one operation may run on a segmenter at a time; a concurrent call rejects. `initialize()` can preload the model. `exportCutout()` can also use a previously saved mask without loading the model. `dispose()` terminates its worker and rejects in-flight work. The default input limits are 25 MiB compressed and 40 million decoded pixels; pass `maxInputBytes` or `maxInputPixels` to tighten them. JPEG, PNG, and WebP dimensions are checked from the file header before full decode. Invalid, truncated, oversized, and mismatched mask inputs raise an error. Model files must be same-origin.
 
-Keep the source image and `mask.data` separately. To preview, sample the mask at the canvas's *display* resolution and use it as alpha for the source image. No full-source-resolution RGBA cutout is created by this library. A 6000 × 4000 source still produces a 512 × 512 mask with an explicit full-source coordinate mapping. The small mask cannot recover hair detail absent from 512-pixel inference.
+Keep the source image and `mask.data` separately. To preview, sample the mask at the canvas's *display* resolution and use it as alpha for the source image. `exportCutout()` allocates a full-source-resolution canvas only when called; it scales the native mask to the source coordinates and multiplies existing image transparency. A 6000 × 4000 source still produces a 512 × 512 mask with an explicit full-source coordinate mapping. The small mask cannot recover hair detail absent from 512-pixel inference. Large final PNG exports may require substantially more memory than normal segmentation.
 
 ## Reproduce the candidate model
 
@@ -64,7 +65,5 @@ Export tools are not browser dependencies. Direct tool versions and the source r
 ## Qualification still needed
 
 The included graph is fixed at 512 × 512. Changing inference resolution requires another exported and tested model artifact; resizing a mask after inference cannot restore edge detail. A 512-pixel synthetic browser check passed. With no concurrent export workload on the development machine, the observed cold and warm runs took about 7.6 and 4.7 seconds; an overlapping PyTorch export slowed one run to 38 seconds. Measure cold and warm inference time, peak memory, mask quality, and failure rate on representative images and target devices. Decide whether this model is acceptable before calling it the replacement. Benchmark other permissively licensed models if it is not. WebGPU and threaded WASM are future optimizations; the latter requires cross-origin isolation.
-
-TODO: Large input files are checked for pixel count after `createImageBitmap` decodes them. Add header or `ImageDecoder` dimension inspection before decoding if the library will accept untrusted huge images at scale.
 
 See [third-party notices](THIRD_PARTY_NOTICES.md) for the model and runtime licenses.

@@ -1,14 +1,56 @@
 import * as ort from "onnxruntime-web/wasm";
-import { outputToMask, pixelsToTensor, type ModelConfig } from "./mask";
+import { imageDimensions } from "./image";
+import { outputToMask, pixelsToTensor, type Mask, type ModelConfig } from "./mask";
 
 type Request =
   | { type: "initialize"; model: ModelConfig }
-  | { type: "segment"; image: Blob; maxInputPixels: number };
+  | { type: "segment"; image: Blob; maxInputPixels: number }
+  | { type: "exportCutout"; image: Blob; mask: Mask; maxInputPixels: number };
 
 let session: ort.InferenceSession | undefined;
 let model: ModelConfig | undefined;
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.wasmPaths = new URL("./", import.meta.url).href;
+
+async function decodeImage(image: Blob, maxInputPixels: number): Promise<ImageBitmap> {
+  self.postMessage({ type: "progress", stage: "reading-image-header" });
+  const { width, height } = imageDimensions(new Uint8Array(await image.arrayBuffer()));
+  if (width * height > maxInputPixels) throw new Error("Image dimensions exceed the configured pixel limit.");
+  self.postMessage({ type: "progress", stage: "decoding-image" });
+  let bitmap: ImageBitmap;
+  try { bitmap = await createImageBitmap(image); }
+  catch { throw new Error("Could not decode JPEG, PNG, or WebP image."); }
+  if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > maxInputPixels) {
+    bitmap.close();
+    throw new Error("Image dimensions exceed the configured pixel limit.");
+  }
+  return bitmap;
+}
+
+async function exportCutout(image: Blob, mask: Mask, maxInputPixels: number): Promise<Blob> {
+  const bitmap = await decodeImage(image, maxInputPixels);
+  try {
+    if (bitmap.width !== mask.sourceWidth || bitmap.height !== mask.sourceHeight) throw new Error("Mask source dimensions do not match the image.");
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas 2D is unavailable in the worker.");
+    context.drawImage(bitmap, 0, 0);
+    const maskCanvas = new OffscreenCanvas(mask.width, mask.height);
+    const maskContext = maskCanvas.getContext("2d");
+    if (!maskContext) throw new Error("Canvas 2D is unavailable in the worker.");
+    const pixels = maskContext.createImageData(mask.width, mask.height);
+    for (let i = 0; i < mask.data.length; i++) {
+      const offset = i * 4;
+      pixels.data[offset] = pixels.data[offset + 1] = pixels.data[offset + 2] = 255;
+      pixels.data[offset + 3] = mask.data[i];
+    }
+    maskContext.putImageData(pixels, 0, 0);
+    context.globalCompositeOperation = "destination-in";
+    context.drawImage(maskCanvas, 0, 0, bitmap.width, bitmap.height);
+    self.postMessage({ type: "progress", stage: "encoding-png" });
+    return await canvas.convertToBlob({ type: "image/png" });
+  } finally { bitmap.close(); }
+}
 
 self.onmessage = async (event: MessageEvent<Request>) => {
   try {
@@ -22,14 +64,15 @@ self.onmessage = async (event: MessageEvent<Request>) => {
       self.postMessage({ type: "ready" });
       return;
     }
+    if (request.type === "exportCutout") {
+      const blob = await exportCutout(request.image, request.mask, request.maxInputPixels);
+      self.postMessage({ type: "exported", blob });
+      return;
+    }
     if (!session || !model) throw new Error("Model is not initialized.");
-    self.postMessage({ type: "progress", stage: "decoding-image" });
-    // TODO: createImageBitmap may decode a very large image before the pixel-limit check.
-    // Read dimensions from image headers or ImageDecoder metadata before decoding if untrusted huge files become common.
-    const bitmap = await createImageBitmap(request.image);
+    const bitmap = await decodeImage(request.image, request.maxInputPixels);
     try {
       const sourceWidth = bitmap.width, sourceHeight = bitmap.height;
-      if (!sourceWidth || !sourceHeight || sourceWidth * sourceHeight > request.maxInputPixels) throw new Error("Image dimensions exceed the configured pixel limit.");
       const canvas = new OffscreenCanvas(model.inputWidth, model.inputHeight);
       const context = canvas.getContext("2d", { willReadFrequently: true });
       if (!context) throw new Error("Canvas 2D is unavailable in the worker.");

@@ -11,6 +11,7 @@ export interface SegmenterOptions {
 export interface Segmenter {
   initialize(onProgress?: (stage: string) => void): Promise<void>;
   segment(image: Blob, onProgress?: (stage: string) => void): Promise<Mask>;
+  exportCutout(image: Blob, mask: Mask, onProgress?: (stage: string) => void): Promise<Blob>;
   dispose(): void;
 }
 
@@ -18,6 +19,7 @@ type WorkerReply =
   | { type: "progress"; stage: string }
   | { type: "ready" }
   | { type: "done"; mask: Mask }
+  | { type: "exported"; blob: Blob }
   | { type: "error"; error: string };
 
 export function createSegmenter(options: SegmenterOptions): Segmenter {
@@ -32,6 +34,16 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   let initializing: Promise<void> | undefined;
   let pending: { resolve(value: WorkerReply): void; reject(error: Error): void; onProgress?: (stage: string) => void } | undefined;
   let disposed = false;
+
+  function validateImage(image: Blob): void {
+    if (!image || typeof image.size !== "number" || typeof image.arrayBuffer !== "function") throw new Error("Input must be an image Blob.");
+    if (!Number.isSafeInteger(image.size) || !image.size || image.size > maxInputBytes) throw new Error(`Image must be between 1 and ${maxInputBytes} bytes.`);
+    if (image.type && !["image/jpeg", "image/png", "image/webp"].includes(image.type)) throw new Error("Use a JPEG, PNG, or WebP image.");
+  }
+
+  function validateMask(mask: Mask): void {
+    if (!mask || !(mask.data instanceof Uint8Array) || ![mask.width, mask.height, mask.sourceWidth, mask.sourceHeight].every(value => Number.isSafeInteger(value) && value > 0) || mask.width > 2048 || mask.height > 2048 || mask.width * mask.height > 2_097_152 || mask.sourceWidth * mask.sourceHeight > maxInputPixels || mask.data.length !== mask.width * mask.height) throw new Error("Mask has invalid dimensions or pixel data.");
+  }
 
   function getWorker(): Worker {
     if (disposed) throw new Error("Segmenter has been disposed.");
@@ -60,7 +72,7 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   }
 
   function send(message: object, onProgress?: (stage: string) => void): Promise<WorkerReply> {
-    if (pending) return Promise.reject(new Error("Another segmentation operation is running."));
+    if (pending) return Promise.reject(new Error("Another operation is running."));
     return new Promise((resolve, reject) => {
       pending = { resolve, reject, onProgress };
       try { getWorker().postMessage(message); }
@@ -74,13 +86,18 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
       return initializing;
     },
     async segment(image, onProgress) {
-      if (!image || typeof image.size !== "number" || typeof image.arrayBuffer !== "function") throw new Error("Input must be an image Blob.");
-      if (!image.size || image.size > maxInputBytes) throw new Error(`Image must be between 1 and ${maxInputBytes} bytes.`);
-      if (image.type && !["image/jpeg", "image/png", "image/webp"].includes(image.type)) throw new Error("Use a JPEG, PNG, or WebP image.");
+      validateImage(image);
       await this.initialize(onProgress);
       const reply = await send({ type: "segment", image, maxInputPixels }, onProgress);
       if (reply.type !== "done") throw new Error("Segmentation worker returned an unexpected response.");
       return reply.mask;
+    },
+    async exportCutout(image, mask, onProgress) {
+      validateImage(image);
+      validateMask(mask);
+      const reply = await send({ type: "exportCutout", image, mask, maxInputPixels }, onProgress);
+      if (reply.type !== "exported") throw new Error("Export worker returned an unexpected response.");
+      return reply.blob;
     },
     dispose() {
       disposed = true;

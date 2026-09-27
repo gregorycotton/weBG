@@ -6,6 +6,39 @@
 <script type="module">
   import { createSegmenter } from "/dist/index.js";
 
+  const model = {
+    id: "test-channel-mean", url: "/test/mean.onnx", inputName: "input_image", outputName: "mask",
+    inputWidth: 2, inputHeight: 2, mean: [0, 0, 0], std: [1, 1, 1], output: "probabilities"
+  };
+
+  function check(condition, message) { if (!condition) throw new Error(message); }
+
+  async function imageBlob(width, height, type = "image/png", pixels) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (pixels) context.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+    else { context.fillStyle = "red"; context.fillRect(0, 0, width, height); }
+    return await new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error(`Could not encode ${type}`)), type));
+  }
+
+  async function exportedPixels(blob) {
+    check(blob.type === "image/png", "Export must be PNG");
+    const bitmap = await createImageBitmap(blob);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width; canvas.height = bitmap.height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      context.drawImage(bitmap, 0, 0);
+      return { width: bitmap.width, height: bitmap.height, data: context.getImageData(0, 0, bitmap.width, bitmap.height).data };
+    } finally { bitmap.close(); }
+  }
+
+  async function rejects(promise, pattern) {
+    try { await promise; } catch (error) { check(pattern.test(String(error)), `Unexpected error: ${error}`); return; }
+    throw new Error(`Expected error ${pattern}`);
+  }
+
   document.querySelector("#run").onclick = async () => {
     const result = document.querySelector("#result");
     result.textContent = "Running…";
@@ -15,16 +48,49 @@
     context.fillStyle = "black"; context.fillRect(0, 0, 1, 1);
     context.fillStyle = "white"; context.fillRect(1, 0, 1, 1);
     const image = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
-    const segmenter = createSegmenter({ model: {
-      id: "test-channel-mean", url: "/test/mean.onnx", inputName: "input_image", outputName: "mask",
-      inputWidth: 2, inputHeight: 2, mean: [0, 0, 0], std: [1, 1, 1], output: "probabilities"
-    } });
+    const segmenter = createSegmenter({ model });
     try {
+      for (const [width, height] of [[4, 4], [4, 8], [8, 4]]) {
+        const source = await imageBlob(width, height);
+        const mask = { data: new Uint8Array([255, 0, 0, 255]), width: 2, height: 2, sourceWidth: width, sourceHeight: height, subjectBounds: { x: 0, y: 0, width, height } };
+        const output = await exportedPixels(await segmenter.exportCutout(source, mask));
+        check(output.width === width && output.height === height, "Export changed image dimensions");
+        const alpha = (x, y) => output.data[(y * width + x) * 4 + 3];
+        check(alpha(0, 0) === 255 && alpha(width - 1, 0) === 0 && alpha(0, height - 1) === 0 && alpha(width - 1, height - 1) === 255, `Mask alignment failed for ${width}×${height}`);
+      }
+
+      const transparent = await imageBlob(2, 2, "image/png", [255, 0, 0, 128, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255]);
+      const allMask = { data: new Uint8Array([128, 255, 255, 255]), width: 2, height: 2, sourceWidth: 2, sourceHeight: 2, subjectBounds: { x: 0, y: 0, width: 2, height: 2 } };
+      const transparentOutput = await exportedPixels(await segmenter.exportCutout(transparent, allMask));
+      check(transparentOutput.data[0] === 255 && Math.abs(transparentOutput.data[3] - 64) <= 1 && transparentOutput.data[7] === 0, "Source color or transparency was not preserved");
+
+      for (const type of ["image/jpeg", "image/webp"]) {
+        const source = await imageBlob(4, 2, type);
+        check(source.type === type, `${type} encoding unavailable`);
+        const opaqueMask = { ...allMask, data: new Uint8Array([255, 255, 255, 255]), sourceWidth: 4 };
+        const output = await exportedPixels(await segmenter.exportCutout(source, opaqueMask));
+        check(output.width === 4 && output.height === 2 && output.data[3] === 255, `${type} export failed`);
+      }
+
+      await rejects(segmenter.exportCutout(image, { ...allMask, sourceWidth: 3 }), /Mask source dimensions/);
+      const hugeHeader = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 39, 16, 0, 0, 39, 16]);
+      await rejects(segmenter.exportCutout(new Blob([hugeHeader], { type: "image/png" }), allMask), /pixel limit/);
+      await rejects(segmenter.exportCutout(new Blob(["bad"], { type: "image/png" }), allMask), /Invalid or truncated/);
+      const truncatedPng = hugeHeader.slice();
+      truncatedPng.set([0, 0, 0, 1, 0, 0, 0, 1], 16);
+      await rejects(segmenter.exportCutout(new Blob([truncatedPng], { type: "image/png" }), allMask), /Could not decode/);
+
       const mask = await segmenter.segment(image, stage => { result.textContent = stage; });
       if (String(mask.data) !== "0,255,255,255" || mask.sourceWidth !== 2 || mask.sourceHeight !== 2) throw new Error(`Unexpected result: ${[...mask.data]}`);
+      const inferredCutout = await exportedPixels(await segmenter.exportCutout(image, mask));
+      check(inferredCutout.data[3] === 0 && inferredCutout.data[7] === 255 && inferredCutout.data[11] === 0, "Inferred mask export failed");
       const again = await segmenter.segment(image);
       if (String(again.data) !== String(mask.data)) throw new Error("Repeated inference changed the mask");
-      result.textContent = `PASS: repeated local WASM inference produced [${[...mask.data]}]`;
+      await rejects(segmenter.segment(new Blob([hugeHeader], { type: "image/png" })), /pixel limit/);
+      const smallLimit = createSegmenter({ model, maxInputBytes: 10 });
+      try { await rejects(smallLimit.exportCutout(new Blob([new Uint8Array(11)], { type: "image/png" }), allMask), /between 1 and 10 bytes/); }
+      finally { smallLimit.dispose(); }
+      result.textContent = `PASS: PNG export alignment, transparency, JPEG/WebP, input limits, and repeated WASM inference [${[...mask.data]}]`;
     } catch (error) {
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;

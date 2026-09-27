@@ -3,3 +3,4 @@ dist/
 *.onnx
 !test/*.onnx
 .venv/
+photoset/
