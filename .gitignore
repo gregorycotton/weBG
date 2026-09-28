@@ -4,3 +4,4 @@ dist/
 !test/*.onnx
 .venv/
 photoset/
+outputs/

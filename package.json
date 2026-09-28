@@ -9,17 +9,24 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "THIRD_PARTY_NOTICES.md"],
+  "files": [
+    "dist",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs && tsc --declaration --emitDeclarationOnly --noEmit false --outDir dist",
     "test": "node --experimental-strip-types --test test/*.test.mjs",
-    "verify:model": "node scripts/verify-model.mjs"
+    "test:batch": "node test/batch-smoke.mjs",
+    "verify:model": "node scripts/verify-model.mjs",
+    "batch": "npm run build && npm run verify:model && node scripts/batch-cutouts.mjs"
   },
   "dependencies": {
     "onnxruntime-web": "1.30.0"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
+    "playwright-core": "1.63.0",
     "typescript": "^5.9.3"
   }
 }

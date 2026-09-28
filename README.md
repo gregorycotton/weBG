@@ -23,7 +23,13 @@ npm run verify:model
 python3 -m http.server 8765 --bind 127.0.0.1
 ```
 
-Open `http://127.0.0.1:8765/test/subject.html` and choose an image, or run the built-in synthetic sample. `test/browser.html` checks the worker and WASM runtime using a tiny deterministic ONNX model. Serve over HTTP; `file://` will not work for the worker and WASM asset requests.
+Open `http://127.0.0.1:8765/test/subject.html` and choose an image, or run the built-in synthetic sample. Click **Run self-hosted subject model**, then **Generate full-size PNG** and **Download PNG** to inspect the actual export. `test/browser.html` checks export geometry, transparency, malformed inputs, and the worker and WASM runtime using a tiny deterministic ONNX model. Serve over HTTP; `file://` will not work for the worker and WASM asset requests.
+
+## Batch cutouts for review
+
+After adding photos to `photoset/`, run `npm run batch` from the weBG root. It processes the JPEG, PNG, and WebP files directly in that folder through the browser library and writes `outputs/<original-name>-CUTOUT.png` (for example, `dog.jpg` becomes `dog-CUTOUT.png`). It reuses one model session, skips output files that already exist, and reports failures per image. It does not alter input photos or existing cutouts. The command uses a separate headless Google Chrome instance and requires Chrome to be installed. It builds the library and checks the model hash before processing.
+
+To test the batch command without touching either folder, run `npm run test:batch`. It uses a temporary synthetic image and removes its results afterward. The script also accepts two optional folder paths: `npm run batch -- /path/to/input /path/to/output`.
 
 If the binary is missing, generate it as described below. `npm run verify:model` compares the model's SHA-256 with the manifest before deployment. Publish `dist/index.js`, `dist/worker.js`, both `dist/ort-wasm-simd-threaded.*` files, the model, and its manifest on the same origin. Keep the worker and WASM files adjacent to `index.js`. The model URL in the manifest is `/models/birefnet-lite-512.onnx`; adjust it for the host path if necessary.
 

@@ -3,15 +3,28 @@
 <title>weBG subject model check</title>
 <label>Image <input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label>
 <button id="run">Run self-hosted subject model</button>
+<button id="export" disabled>Generate full-size PNG</button>
+<a id="download" hidden>Download PNG</a>
 <pre id="result">Ready</pre>
 <canvas id="preview" width="512" height="512" style="background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 24px 24px"></canvas>
 <script type="module">
   import { createSegmenter } from "/dist/index.js";
 
-  let segmenter;
+  let segmenter, latestImage, latestMask, exportUrl;
+  const exportButton = document.querySelector("#export");
+  const download = document.querySelector("#download");
+  function clearExport() {
+    latestImage = latestMask = undefined;
+    exportButton.disabled = true;
+    download.hidden = true;
+    if (exportUrl) URL.revokeObjectURL(exportUrl);
+    exportUrl = undefined;
+  }
+  document.querySelector("#image").onchange = clearExport;
   document.querySelector("#run").onclick = async () => {
     const result = document.querySelector("#result");
     const preview = document.querySelector("#preview");
+    clearExport();
     result.textContent = "Preparing…";
     const manifest = await fetch("/models/birefnet-lite-512.json").then(response => response.json());
     const chosen = document.querySelector("#image").files?.[0];
@@ -45,11 +58,35 @@
       context.globalCompositeOperation = "destination-in";
       context.drawImage(maskCanvas, 0, 0, 512, 512);
       context.globalCompositeOperation = "source-over";
+      latestImage = image;
+      latestMask = mask;
+      exportButton.disabled = false;
       result.textContent = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; ${Math.round(performance.now() - start)} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
     } catch (error) {
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;
     }
   };
-  window.addEventListener("pagehide", () => segmenter?.dispose());
+  exportButton.onclick = async () => {
+    const result = document.querySelector("#result");
+    const runButton = document.querySelector("#run");
+    const imageInput = document.querySelector("#image");
+    const image = latestImage, mask = latestMask;
+    exportButton.disabled = true;
+    runButton.disabled = imageInput.disabled = true;
+    download.hidden = true;
+    try {
+      const png = await segmenter.exportCutout(image, mask, stage => { result.textContent = stage; });
+      if (exportUrl) URL.revokeObjectURL(exportUrl);
+      exportUrl = URL.createObjectURL(png);
+      download.href = exportUrl;
+      download.download = `${image instanceof File ? image.name.replace(/\.[^.]+$/, "") : "sample"}-cutout.png`;
+      download.hidden = false;
+      result.textContent = `PNG ready: ${mask.sourceWidth}×${mask.sourceHeight}, ${(png.size / 1024 / 1024).toFixed(1)} MiB`;
+    } catch (error) {
+      result.textContent = `FAIL: ${error.stack || error}`;
+      throw error;
+    } finally { exportButton.disabled = runButton.disabled = imageInput.disabled = false; }
+  };
+  window.addEventListener("pagehide", () => { clearExport(); segmenter?.dispose(); });
 </script>
