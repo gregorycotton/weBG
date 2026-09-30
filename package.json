@@ -19,7 +19,8 @@
     "test": "node --experimental-strip-types --test test/*.test.mjs",
     "test:batch": "node test/batch-smoke.mjs",
     "verify:model": "node scripts/verify-model.mjs",
-    "batch": "npm run build && npm run verify:model && node scripts/batch-cutouts.mjs"
+    "batch": "npm run build && node scripts/batch-cutouts.mjs",
+    "batch:768": "npm run batch -- photoset outputs-768 models/birefnet-lite-768.json"
   },
   "dependencies": {
     "onnxruntime-web": "1.30.0"

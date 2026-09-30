@@ -1,18 +1,20 @@
 import { createReadStream } from "node:fs";
-import { access, link, mkdir, readFile, readdir, stat, unlink } from "node:fs/promises";
+import { access, link, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { verifyModel } from "./verify-model.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const mime = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 const args = process.argv.slice(2);
-if (args.length !== 0 && args.length !== 2) throw new Error("Usage: npm run batch -- [input-folder output-folder]");
+if (![0, 2, 3].includes(args.length)) throw new Error("Usage: npm run batch -- [input-folder output-folder [model-manifest]]");
 const inputDir = resolve(args[0] ?? join(root, "photoset"));
 const outputDir = resolve(args[1] ?? join(root, "outputs"));
+const manifestPath = resolve(args[2] ?? join(root, "models/birefnet-lite-512.json"));
 
 async function exists(path) {
   try { await access(path); return true; }
@@ -38,8 +40,8 @@ async function main() {
   }
   if (!pending.length) { console.log("All cutouts already exist."); return; }
   await access(join(root, "dist/index.js"));
-  await access(join(root, "models/birefnet-lite-512.onnx"));
-  const { runtime } = JSON.parse(await readFile(join(root, "models/birefnet-lite-512.json"), "utf8"));
+  const { runtime } = await verifyModel(manifestPath);
+  const modelFile = join(dirname(manifestPath), basename(runtime.url));
   let activePhoto;
   const server = createServer((request, response) => {
     const path = new URL(request.url, "http://localhost").pathname;
@@ -55,8 +57,8 @@ async function main() {
     } else if (request.method === "GET" && /^\/dist\/[\w.-]+$/.test(path)) {
       file = join(root, path);
       type = path.endsWith(".wasm") ? "application/wasm" : "text/javascript";
-    } else if (request.method === "GET" && path === "/models/birefnet-lite-512.onnx") {
-      file = join(root, path);
+    } else if (request.method === "GET" && path === runtime.url) {
+      file = modelFile;
       type = "application/octet-stream";
     } else {
       response.writeHead(404); response.end("Not found"); return;
@@ -93,19 +95,22 @@ async function main() {
           const response = await fetch("/input");
           if (!response.ok) throw new Error(`Could not load input (${response.status})`);
           const image = await response.blob();
+          const start = performance.now();
           const mask = await globalThis.batchSegmenter.segment(image);
+          const segmented = performance.now();
           const png = await globalThis.batchSegmenter.exportCutout(image, mask);
+          const exported = performance.now();
           const download = document.querySelector("#download");
           download.href = URL.createObjectURL(png);
           download.download = "cutout.png";
-          return { width: mask.sourceWidth, height: mask.sourceHeight, bytes: png.size };
+          return { width: mask.sourceWidth, height: mask.sourceHeight, bytes: png.size, segmentMs: Math.round(segmented - start), exportMs: Math.round(exported - segmented) };
         });
         const downloadPromise = page.waitForEvent("download", { timeout: 120000 });
         await page.locator("#download").click();
         const download = await downloadPromise;
         await download.saveAs(temporary);
         await link(temporary, output); // Never overwrite a reviewed result.
-        console.log(`  WROTE ${basename(output)} (${details.width}×${details.height}, ${(details.bytes / 1024 / 1024).toFixed(1)} MiB)`);
+        console.log(`  WROTE ${basename(output)} (${details.width}×${details.height}, ${(details.bytes / 1024 / 1024).toFixed(1)} MiB; segment ${details.segmentMs} ms, PNG ${details.exportMs} ms)`);
       } catch (error) {
         failed++;
         console.error(`  FAILED ${photo}: ${error.message}`);

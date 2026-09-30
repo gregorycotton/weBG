@@ -5,3 +5,6 @@ dist/
 .venv/
 photoset/
 outputs/
+outputs-768/
+outputs-1024/
+.DS_Store
