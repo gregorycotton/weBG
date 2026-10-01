@@ -86,6 +86,14 @@
       check(inferredCutout.data[3] === 0 && inferredCutout.data[7] === 255 && inferredCutout.data[11] === 0, "Inferred mask export failed");
       const again = await segmenter.segment(image);
       if (String(again.data) !== String(mask.data)) throw new Error("Repeated inference changed the mask");
+      const redSource = await imageBlob(4, 4);
+      const blankMask = { ...allMask, data: new Uint8Array(4), sourceWidth: 4, sourceHeight: 4 };
+      const detailRegion = { x: 1, y: 1, width: 2, height: 2 };
+      const refined = await segmenter.refine(redSource, blankMask, detailRegion, "add");
+      check(refined.width === 1024 && refined.height === 1024 && refined.data[512 * 1024 + 512] > 50 && refined.data[512 * 1024 + 100] === 0, "Region refinement failed");
+      check(blankMask.data.every(value => value === 0), "Refinement changed the original mask");
+      await rejects(segmenter.refine(redSource, blankMask, { x: 3, y: 3, width: 2, height: 2 }, "add"), /inside the source/);
+      await rejects(segmenter.refine(redSource, blankMask, detailRegion, "wrong"), /mode/);
       await rejects(segmenter.segment(new Blob([hugeHeader], { type: "image/png" })), /pixel limit/);
       const smallLimit = createSegmenter({ model, maxInputBytes: 10 });
       try { await rejects(smallLimit.exportCutout(new Blob([new Uint8Array(11)], { type: "image/png" }), allMask), /between 1 and 10 bytes/); }
@@ -98,7 +106,7 @@
         const reduced = await exportedPixels(await exportLimit.exportCutout(await imageBlob(8, 4), wideMask, undefined, { maxOutputPixels: 8 }));
         check(reduced.width === 4 && reduced.height === 2 && reduced.data[3] === 255, "Reduced PNG export failed");
       } finally { exportLimit.dispose(); }
-      result.textContent = `PASS: PNG export alignment, transparency, resize, export/input limits, JPEG/WebP, and repeated WASM inference [${[...mask.data]}]`;
+      result.textContent = `PASS: PNG export alignment, transparency, resize, region refinement, export/input limits, JPEG/WebP, and repeated WASM inference [${[...mask.data]}]`;
     } catch (error) {
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;

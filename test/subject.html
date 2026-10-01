@@ -3,21 +3,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>weBG subject model check</title>
 <label>Image <input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label>
-<label>Model <select id="model"><option value="512">512 (iPhone tested)</option><option value="768">768 (experimental on iPhone)</option></select></label>
+<label>Model <select id="model"><option value="512">512 (iPhone tested)</option><option value="768">768 (unsupported on iPhone 16)</option></select></label>
 <label><input id="show-preview" type="checkbox"> Show preview</label>
+<label><input id="show-original" type="checkbox"> Show original for region selection</label>
 <button id="run">Run self-hosted subject model</button>
+<fieldset>
+  <legend>Optional 512 detail pass</legend>
+  <p>Show preview and drag a box around the area to improve. Check Show original to locate a missing object. Use Replace for detail or Add for a missing subject. You can also enter the box as percentages.</p>
+  <label>Left % <input id="region-x" type="number" min="0" max="99" value="25"></label>
+  <label>Top % <input id="region-y" type="number" min="0" max="99" value="25"></label>
+  <label>Width % <input id="region-width" type="number" min="1" max="100" value="50"></label>
+  <label>Height % <input id="region-height" type="number" min="1" max="100" value="50"></label>
+  <label>Action <select id="refine-mode"><option value="replace">Replace detail</option><option value="add">Add subject</option></select></label>
+  <button id="refine" disabled>Refine selected region</button>
+</fieldset>
 <label>PNG size <select id="export-size"><option value="full">Full size (up to 16 MP)</option><option value="8000000">Up to 8 MP</option><option value="4000000">Up to 4 MP</option></select></label>
 <button id="export" disabled>Generate PNG</button>
 <a id="download" hidden>Download PNG</a>
 <pre id="result" style="white-space:pre-wrap;overflow-wrap:anywhere">Ready</pre>
 <pre id="previous-run" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
-<canvas id="preview" width="512" height="512" hidden style="max-width:100%;height:auto;background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 24px 24px"></canvas>
+<div id="preview-wrap" hidden style="position:relative;width:min(100%,512px)">
+  <canvas id="preview" width="512" height="512" style="display:block;width:100%;height:auto;background:repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 0 0 / 24px 24px"></canvas>
+  <canvas id="region-overlay" width="512" height="512" aria-label="Drag to select a refinement region" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair"></canvas>
+</div>
 <script type="module">
   import { createSegmenter } from "/dist/index.js";
 
   let segmenter, latestImage, latestMask, exportUrl;
   const exportButton = document.querySelector("#export");
+  const refineButton = document.querySelector("#refine");
+  const modelInput = document.querySelector("#model");
   const download = document.querySelector("#download");
+  const preview = document.querySelector("#preview");
+  const previewWrap = document.querySelector("#preview-wrap");
+  const overlay = document.querySelector("#region-overlay");
+  const regionFields = ["x", "y", "width", "height"].map(name => document.querySelector(`#region-${name}`));
   const lastStageKey = "webg-subject-last-stage";
   try {
     const previous = JSON.parse(localStorage.getItem(lastStageKey) || "null");
@@ -30,35 +50,97 @@
   function clearLastStage() {
     try { localStorage.removeItem(lastStageKey); } catch { /* Storage may be unavailable. */ }
   }
-  function clearExport() {
-    latestImage = latestMask = undefined;
-    exportButton.disabled = true;
+  function clearDownload() {
     download.hidden = true;
-    document.querySelector("#preview").hidden = true;
     if (exportUrl) URL.revokeObjectURL(exportUrl);
     exportUrl = undefined;
   }
+  function clearExport() {
+    latestImage = latestMask = undefined;
+    exportButton.disabled = refineButton.disabled = true;
+    previewWrap.hidden = true;
+    clearDownload();
+  }
+  function selection() {
+    const values = regionFields.map(field => Number(field.value));
+    const [x, y, width, height] = values;
+    if (!values.every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100 || y + height > 100) throw new Error("Select a valid region inside the image.");
+    return { x, y, width, height };
+  }
+  function drawSelection() {
+    const context = overlay.getContext("2d");
+    context.clearRect(0, 0, 512, 512);
+    let region;
+    try { region = selection(); } catch { return; }
+    context.strokeStyle = "#ffcb05";
+    context.lineWidth = 4;
+    context.strokeRect(region.x * 5.12, region.y * 5.12, region.width * 5.12, region.height * 5.12);
+  }
+  for (const field of regionFields) field.oninput = drawSelection;
+  drawSelection();
+  let dragStart;
+  function pointerPosition(event) {
+    const bounds = overlay.getBoundingClientRect();
+    return { x: Math.max(0, Math.min(100, (event.clientX - bounds.left) * 100 / bounds.width)), y: Math.max(0, Math.min(100, (event.clientY - bounds.top) * 100 / bounds.height)) };
+  }
+  overlay.onpointerdown = event => { dragStart = pointerPosition(event); overlay.setPointerCapture(event.pointerId); };
+  overlay.onpointermove = event => {
+    if (!dragStart) return;
+    const point = pointerPosition(event);
+    const values = [Math.min(dragStart.x, point.x), Math.min(dragStart.y, point.y), Math.abs(point.x - dragStart.x), Math.abs(point.y - dragStart.y)];
+    values.forEach((value, index) => { regionFields[index].value = String(Math.round(value * 10) / 10); });
+    drawSelection();
+  };
+  overlay.onpointerup = overlay.onpointercancel = () => { dragStart = undefined; };
+  async function drawPreview() {
+    if (!latestImage || !latestMask || !document.querySelector("#show-preview").checked) { previewWrap.hidden = true; return; }
+    const context = preview.getContext("2d");
+    context.clearRect(0, 0, 512, 512);
+    const bitmap = await createImageBitmap(latestImage, { resizeWidth: 512, resizeHeight: 512 });
+    context.drawImage(bitmap, 0, 0, 512, 512); bitmap.close();
+    if (!document.querySelector("#show-original").checked) {
+      const mask = latestMask;
+      const maskCanvas = document.createElement("canvas");
+      maskCanvas.width = mask.width; maskCanvas.height = mask.height;
+      const maskContext = maskCanvas.getContext("2d");
+      const pixels = maskContext.createImageData(mask.width, mask.height);
+      for (let i = 0; i < mask.data.length; i++) {
+        pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = 255;
+        pixels.data[i * 4 + 3] = mask.data[i];
+      }
+      maskContext.putImageData(pixels, 0, 0);
+      context.globalCompositeOperation = "destination-in";
+      context.drawImage(maskCanvas, 0, 0, 512, 512);
+      context.globalCompositeOperation = "source-over";
+    }
+    previewWrap.hidden = false;
+    drawSelection();
+  }
+  document.querySelector("#show-preview").onchange = () => { drawPreview().catch(error => { document.querySelector("#result").textContent += `\nPreview unavailable: ${error.message}`; }); };
+  document.querySelector("#show-original").onchange = () => { drawPreview().catch(error => { document.querySelector("#result").textContent += `\nPreview unavailable: ${error.message}`; }); };
   document.querySelector("#image").onchange = clearExport;
   document.querySelector("#model").onchange = () => { clearExport(); segmenter?.dispose(); segmenter = undefined; };
   document.querySelector("#run").onclick = async () => {
     const result = document.querySelector("#result");
-    const preview = document.querySelector("#preview");
+    const runButton = document.querySelector("#run");
+    const imageInput = document.querySelector("#image");
+    runButton.disabled = imageInput.disabled = modelInput.disabled = true;
     clearExport();
-    const modelSize = Number(document.querySelector("#model").value);
-    const chosen = document.querySelector("#image").files?.[0];
+    const modelSize = Number(modelInput.value);
+    const chosen = imageInput.files?.[0];
     const imageName = chosen?.name || "sample";
     remember("preparing", imageName, modelSize);
-    let image = chosen;
-    if (!image) {
-      const sample = document.createElement("canvas");
-      sample.width = 256; sample.height = 256;
-      const context = sample.getContext("2d");
-      context.fillStyle = "#f0e8d8"; context.fillRect(0, 0, 256, 256);
-      context.fillStyle = "#304b79"; context.beginPath(); context.ellipse(128, 135, 68, 92, 0, 0, Math.PI * 2); context.fill();
-      image = await new Promise(resolve => sample.toBlob(resolve, "image/png"));
-    }
     const start = performance.now();
     try {
+      let image = chosen;
+      if (!image) {
+        const sample = document.createElement("canvas");
+        sample.width = 256; sample.height = 256;
+        const context = sample.getContext("2d");
+        context.fillStyle = "#f0e8d8"; context.fillRect(0, 0, 256, 256);
+        context.fillStyle = "#304b79"; context.beginPath(); context.ellipse(128, 135, 68, 92, 0, 0, Math.PI * 2); context.fill();
+        image = await new Promise(resolve => sample.toBlob(resolve, "image/png"));
+      }
       const response = await fetch(`/models/birefnet-lite-${modelSize}.json`);
       if (!response.ok) throw new Error(`Could not load ${modelSize} model manifest (${response.status}).`);
       const manifest = await response.json();
@@ -69,28 +151,13 @@
       latestImage = image;
       latestMask = mask;
       exportButton.disabled = false;
+      refineButton.disabled = modelSize !== 512;
       const passText = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; segment ${segmentMs} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
       result.textContent = passText;
       if (document.querySelector("#show-preview").checked) {
         try {
           remember("drawing-preview", imageName, modelSize);
-          const maskCanvas = document.createElement("canvas");
-          maskCanvas.width = mask.width; maskCanvas.height = mask.height;
-          const maskContext = maskCanvas.getContext("2d");
-          const pixels = maskContext.createImageData(mask.width, mask.height);
-          for (let i = 0; i < mask.data.length; i++) {
-            pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = 255;
-            pixels.data[i * 4 + 3] = mask.data[i];
-          }
-          maskContext.putImageData(pixels, 0, 0);
-          const context = preview.getContext("2d");
-          context.clearRect(0, 0, 512, 512);
-          const bitmap = await createImageBitmap(image, { resizeWidth: 512, resizeHeight: 512 });
-          context.drawImage(bitmap, 0, 0, 512, 512); bitmap.close();
-          context.globalCompositeOperation = "destination-in";
-          context.drawImage(maskCanvas, 0, 0, 512, 512);
-          context.globalCompositeOperation = "source-over";
-          preview.hidden = false;
+          await drawPreview();
           result.textContent = passText;
         } catch (error) {
           result.textContent = `${passText}\nPreview unavailable: ${error.message}`;
@@ -101,7 +168,37 @@
       clearLastStage();
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;
-    }
+    } finally { runButton.disabled = imageInput.disabled = modelInput.disabled = false; }
+  };
+  refineButton.onclick = async () => {
+    const result = document.querySelector("#result");
+    const runButton = document.querySelector("#run");
+    const imageInput = document.querySelector("#image");
+    const image = latestImage, mask = latestMask;
+    const imageName = image instanceof File ? image.name : "sample";
+    const modelSize = document.querySelector("#model").value;
+    try {
+      const selected = selection();
+      const x = Math.floor(selected.x * mask.sourceWidth / 100), y = Math.floor(selected.y * mask.sourceHeight / 100);
+      const region = { x, y, width: Math.min(mask.sourceWidth, Math.ceil((selected.x + selected.width) * mask.sourceWidth / 100)) - x, height: Math.min(mask.sourceHeight, Math.ceil((selected.y + selected.height) * mask.sourceHeight / 100)) - y };
+      const mode = document.querySelector("#refine-mode").value;
+      refineButton.disabled = exportButton.disabled = runButton.disabled = imageInput.disabled = modelInput.disabled = true;
+      const start = performance.now();
+      remember("starting-refinement", imageName, modelSize);
+      const refined = await segmenter.refine(image, mask, region, mode, stage => remember(`refining-${stage}`, imageName, modelSize));
+      latestMask = refined;
+      clearDownload();
+      let previewError;
+      if (document.querySelector("#show-preview").checked) {
+        remember("drawing-refined-preview", imageName, modelSize);
+        try { await drawPreview(); } catch (error) { previewError = error; }
+      }
+      result.textContent = `REFINED: ${mode} ${JSON.stringify(region)}; ${refined.width}×${refined.height} mask; ${Math.round(performance.now() - start)} ms${previewError ? `\nPreview unavailable: ${previewError.message}` : ""}`;
+      clearLastStage();
+    } catch (error) {
+      clearLastStage();
+      result.textContent = `FAIL: ${error.stack || error}`;
+    } finally { refineButton.disabled = false; exportButton.disabled = runButton.disabled = imageInput.disabled = modelInput.disabled = false; }
   };
   exportButton.onclick = async () => {
     const result = document.querySelector("#result");
@@ -110,8 +207,8 @@
     const image = latestImage, mask = latestMask;
     const imageName = image instanceof File ? image.name : "sample";
     const modelSize = document.querySelector("#model").value;
-    exportButton.disabled = true;
-    runButton.disabled = imageInput.disabled = true;
+    exportButton.disabled = refineButton.disabled = true;
+    runButton.disabled = imageInput.disabled = modelInput.disabled = true;
     download.hidden = true;
     try {
       const start = performance.now();
@@ -131,7 +228,7 @@
       clearLastStage();
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;
-    } finally { exportButton.disabled = runButton.disabled = imageInput.disabled = false; }
+    } finally { exportButton.disabled = runButton.disabled = imageInput.disabled = modelInput.disabled = false; refineButton.disabled = modelSize !== "512"; }
   };
   window.addEventListener("pagehide", () => { clearExport(); segmenter?.dispose(); });
 </script>

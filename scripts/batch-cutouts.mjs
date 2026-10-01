@@ -12,8 +12,8 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const mime = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 const args = process.argv.slice(2);
 if (![0, 2, 3].includes(args.length)) throw new Error("Usage: npm run batch -- [input-folder output-folder [model-manifest]]");
-const inputDir = resolve(args[0] ?? join(root, "photoset"));
-const outputDir = resolve(args[1] ?? join(root, "outputs"));
+const inputDir = resolve(args[0] ?? join(root, "img-tests/photosets/photoset-1"));
+const outputDir = resolve(args[1] ?? join(root, "img-tests/outputs/outputs-1"));
 const manifestPath = resolve(args[2] ?? join(root, "models/birefnet-lite-512.json"));
 
 async function exists(path) {

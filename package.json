@@ -20,7 +20,7 @@
     "test:batch": "node test/batch-smoke.mjs",
     "verify:model": "node scripts/verify-model.mjs",
     "batch": "npm run build && node scripts/batch-cutouts.mjs",
-    "batch:768": "npm run batch -- photoset outputs-768 models/birefnet-lite-768.json"
+    "batch:768": "npm run batch -- img-tests/photosets/photoset-1 img-tests/outputs/outputs-768 models/birefnet-lite-768.json"
   },
   "dependencies": {
     "onnxruntime-web": "1.30.0"

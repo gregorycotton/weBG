@@ -1,6 +1,6 @@
-import { validateModel, type Mask, type ModelConfig } from "./mask";
+import { validateModel, type Mask, type ModelConfig, type Rect, type RefineMode } from "./mask";
 
-export type { Mask, ModelConfig, Rect } from "./mask";
+export type { Mask, ModelConfig, Rect, RefineMode } from "./mask";
 
 export interface SegmenterOptions {
   model: ModelConfig;
@@ -14,6 +14,7 @@ export interface ExportOptions { maxOutputPixels?: number }
 export interface Segmenter {
   initialize(onProgress?: (stage: string) => void): Promise<void>;
   segment(image: Blob, onProgress?: (stage: string) => void): Promise<Mask>;
+  refine(image: Blob, mask: Mask, region: Rect, mode: RefineMode, onProgress?: (stage: string) => void): Promise<Mask>;
   exportCutout(image: Blob, mask: Mask, onProgress?: (stage: string) => void, options?: ExportOptions): Promise<Blob>;
   dispose(): void;
 }
@@ -94,6 +95,18 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
       await this.initialize(onProgress);
       const reply = await send({ type: "segment", image, maxInputPixels }, onProgress);
       if (reply.type !== "done") throw new Error("Segmentation worker returned an unexpected response.");
+      return reply.mask;
+    },
+    async refine(image, mask, region, mode, onProgress) {
+      validateImage(image);
+      validateMask(mask);
+      if (!region || ![region.x, region.y, region.width, region.height].every(Number.isSafeInteger)
+        || region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0
+        || region.x + region.width > mask.sourceWidth || region.y + region.height > mask.sourceHeight) throw new Error("Refinement region must be inside the source image.");
+      if (mode !== "replace" && mode !== "add") throw new Error("Refinement mode must be replace or add.");
+      await this.initialize(onProgress);
+      const reply = await send({ type: "refine", image, mask, region, mode, maxInputPixels }, onProgress);
+      if (reply.type !== "done") throw new Error("Refinement worker returned an unexpected response.");
       return reply.mask;
     },
     async exportCutout(image, mask, onProgress, options) {
