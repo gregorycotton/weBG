@@ -7,9 +7,9 @@ The reference backend is single-threaded ONNX Runtime Web WASM. The runtime and 
 ## Current status
 
 - Working browser path: inspect JPEG, PNG, or WebP dimensions before decode; resize to the model's fixed input; run WASM inference; return a soft alpha mask and subject bounds in source coordinates. An optional PNG export applies the mask to the original image.
-- Model candidates: our fixed-shape 512, 768, and 1024 FP32 ONNX exports of the same official BiRefNet_lite weights. The 512 model remains the default. The 768 model completed a 50-photo Chrome batch; 1024 failed during WASM inference with `std::bad_alloc` and is not a supported browser option.
+- Model candidates: our fixed-shape 512, 768, and 1024 FP32 ONNX exports of the same official BiRefNet_lite weights. The 512 model remains the default and completed sample runs on an iPhone 16. The 768 model completed a 50-photo Chrome batch but repeatedly reloaded the iPhone Safari page; treat it as experimental there. The 1024 model failed during Chrome WASM inference with `std::bad_alloc` and is not a supported browser option.
 - Each `models/birefnet-lite-<size>.json` records the source revision, upstream and exported SHA-256 hashes, license, export method, tool versions, tensor shapes, and validation errors. The `.onnx` files are deliberately excluded from Git and the npm package; host a chosen model as a separate static asset.
-- This is a functional baseline, not yet a qualified replacement for every IMG.LY image. The 768 review still has scene-selection and disconnected-subject failures, and lower-memory browser devices remain untested.
+- This is a functional baseline, not yet a qualified replacement for every IMG.LY image. The 768 review still has scene-selection and disconnected-subject failures. iPhone 16 testing found that 512 segmentation worked on several photos, while full-size export of a 39.5-megapixel photo reloaded Safari.
 
 ## Build and try it
 
@@ -23,7 +23,7 @@ npm run verify:model
 python3 -m http.server 8765 --bind 127.0.0.1
 ```
 
-Open `http://127.0.0.1:8765/test/subject.html` and choose an image, or run the built-in synthetic sample. Click **Run self-hosted subject model**, then **Generate full-size PNG** and **Download PNG** to inspect the actual export. `test/browser.html` checks export geometry, transparency, malformed inputs, and the worker and WASM runtime using a tiny deterministic ONNX model. Serve over HTTP; `file://` will not work for the worker and WASM asset requests.
+Open `http://127.0.0.1:8765/test/subject.html` and choose an image, or run the built-in synthetic sample. Click **Run self-hosted subject model**, choose full-size or a smaller PNG, then **Generate PNG** and **Download PNG** to inspect the actual export. The full-size option reports a clear error for sources over 16 million pixels. If Safari reloads during a run, the page displays the last reported stage when it reopens, provided browser storage is available. `test/browser.html` checks export geometry, transparency, resizing, malformed inputs, and the worker and WASM runtime using a tiny deterministic ONNX model. Serve over HTTP; `file://` will not work for the worker and WASM asset requests.
 
 ## Batch cutouts for review
 
@@ -45,15 +45,20 @@ try {
   // mask.data: row-major Uint8Array of soft alpha, mask.width × mask.height.
   // mask.sourceWidth/sourceHeight: original decoded image dimensions.
   // mask.subjectBounds: source-coordinate rectangle; empty means no subject.
-  const pngBlob = await segmenter.exportCutout(imageBlob, mask);
+  // Omit the fourth argument for a full-size PNG when the source is at most 16 MP.
+  const pngBlob = await segmenter.exportCutout(imageBlob, mask, undefined, { maxOutputPixels: 8_000_000 });
 } finally {
   segmenter.dispose();
 }
 ```
 
-Reuse one segmenter for multiple images to reuse its loaded session. Only one operation may run on a segmenter at a time; a concurrent call rejects. `initialize()` can preload the model. `exportCutout()` can also use a previously saved mask without loading the model. `dispose()` terminates its worker and rejects in-flight work. The default input limits are 25 MiB compressed and 40 million decoded pixels; pass `maxInputBytes` or `maxInputPixels` to tighten them. JPEG, PNG, and WebP dimensions are checked from the file header before full decode. Invalid, truncated, oversized, and mismatched mask inputs raise an error. Model files must be same-origin.
+Reuse one segmenter for multiple images to reuse its loaded session. Only one operation may run on a segmenter at a time; a concurrent call rejects. `initialize()` can preload the model. `exportCutout()` can also use a previously saved mask without loading the model. `dispose()` terminates its worker and rejects in-flight work. The default input limits are 25 MiB compressed and 40 million decoded pixels; pass `maxInputBytes` or `maxInputPixels` to tighten them. Full-size PNG export has a separate 16-million-pixel limit, configurable with `maxExportPixels` in `createSegmenter()`. A per-call `maxOutputPixels` scales the output within that limit while preserving the source aspect ratio. JPEG, PNG, and WebP dimensions are checked from the file header before full decode. Invalid, truncated, oversized, and mismatched mask inputs raise an error. Model files must be same-origin.
 
-Keep the source image and `mask.data` separately. To preview, sample the mask at the canvas's *display* resolution and use it as alpha for the source image. `exportCutout()` allocates a full-source-resolution canvas only when called; it scales the native mask to the source coordinates and multiplies existing image transparency. A 6000 × 4000 source produces a 512 × 512 or 768 × 768 mask, depending on the model, with an explicit full-source coordinate mapping. Upscaling a mask cannot recover edge detail absent from inference. Large final PNG exports may require substantially more memory than normal segmentation.
+Keep the source image and `mask.data` separately. To preview, sample the mask at the canvas's *display* resolution and use it as alpha for the source image. `exportCutout()` allocates a canvas at the requested output size, scales the native mask to those coordinates, and multiplies existing image transparency. For a smaller PNG, it requests resized decoding from the browser; the browser may still need temporary memory to decode the original. A 6000 × 4000 source produces a 512 × 512 or 768 × 768 mask, depending on the model, with an explicit full-source coordinate mapping. Upscaling a mask cannot recover edge detail absent from inference. Large final PNG exports may require substantially more memory than normal segmentation.
+
+## iPhone 16 follow-up
+
+For an isolated 768 test, close Safari, reopen the test page, select **768** before running any 512 image, leave preview off, and run one small photo through `segment()` without exporting. If the page reloads, note the previous-run stage shown on the page and the time. On the iPhone, check **Settings → Privacy & Security → Analytics & Improvements → Analytics Data** for a `JetsamEvent` at that time. A matching `com.apple.WebKit.WebContent` entry would support memory termination; the stage marker alone cannot establish the cause. Repeat with 512 on the same photo as a control. For the large skeleton photo, select **Up to 8 MP** before generating a PNG. The scaled export reduces its final canvas and encoder workload, but must still be tested on the phone.
 
 ## Reproduce the candidate model
 

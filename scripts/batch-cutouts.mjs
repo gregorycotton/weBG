@@ -83,7 +83,7 @@ async function main() {
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.evaluate(async model => {
       const { createSegmenter } = await import("/dist/index.js");
-      globalThis.batchSegmenter = createSegmenter({ model });
+      globalThis.batchSegmenter = createSegmenter({ model, maxExportPixels: 40_000_000 });
     }, runtime);
     let failed = 0;
     for (const [index, { photo, output }] of pending.entries()) {

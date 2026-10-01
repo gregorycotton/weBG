@@ -6,12 +6,15 @@ export interface SegmenterOptions {
   model: ModelConfig;
   maxInputBytes?: number;
   maxInputPixels?: number;
+  maxExportPixels?: number;
 }
+
+export interface ExportOptions { maxOutputPixels?: number }
 
 export interface Segmenter {
   initialize(onProgress?: (stage: string) => void): Promise<void>;
   segment(image: Blob, onProgress?: (stage: string) => void): Promise<Mask>;
-  exportCutout(image: Blob, mask: Mask, onProgress?: (stage: string) => void): Promise<Blob>;
+  exportCutout(image: Blob, mask: Mask, onProgress?: (stage: string) => void, options?: ExportOptions): Promise<Blob>;
   dispose(): void;
 }
 
@@ -29,7 +32,8 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   const model = { ...options.model, url: modelUrl.href };
   const maxInputBytes = options.maxInputBytes ?? 25 * 1024 * 1024;
   const maxInputPixels = options.maxInputPixels ?? 40_000_000;
-  if (![maxInputBytes, maxInputPixels].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error("Input limits must be positive integers.");
+  const maxExportPixels = options.maxExportPixels ?? 16_000_000;
+  if (![maxInputBytes, maxInputPixels, maxExportPixels].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error("Input and export limits must be positive integers.");
   let worker: Worker | undefined;
   let initializing: Promise<void> | undefined;
   let pending: { resolve(value: WorkerReply): void; reject(error: Error): void; onProgress?: (stage: string) => void } | undefined;
@@ -92,10 +96,14 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
       if (reply.type !== "done") throw new Error("Segmentation worker returned an unexpected response.");
       return reply.mask;
     },
-    async exportCutout(image, mask, onProgress) {
+    async exportCutout(image, mask, onProgress, options) {
       validateImage(image);
       validateMask(mask);
-      const reply = await send({ type: "exportCutout", image, mask, maxInputPixels }, onProgress);
+      const maxOutputPixels = options?.maxOutputPixels;
+      if (maxOutputPixels !== undefined && (!Number.isSafeInteger(maxOutputPixels) || maxOutputPixels <= 0)) throw new Error("maxOutputPixels must be a positive integer.");
+      const outputPixels = Math.min(mask.sourceWidth * mask.sourceHeight, maxOutputPixels ?? Number.MAX_SAFE_INTEGER);
+      if (outputPixels > maxExportPixels) throw new Error(`PNG export exceeds the ${maxExportPixels}-pixel limit. Request a smaller PNG with maxOutputPixels or raise maxExportPixels.`);
+      const reply = await send({ type: "exportCutout", image, mask, maxInputPixels, maxOutputPixels: outputPixels }, onProgress);
       if (reply.type !== "exported") throw new Error("Export worker returned an unexpected response.");
       return reply.blob;
     },

@@ -5,32 +5,45 @@ import { outputToMask, pixelsToTensor, type Mask, type ModelConfig } from "./mas
 type Request =
   | { type: "initialize"; model: ModelConfig }
   | { type: "segment"; image: Blob; maxInputPixels: number }
-  | { type: "exportCutout"; image: Blob; mask: Mask; maxInputPixels: number };
+  | { type: "exportCutout"; image: Blob; mask: Mask; maxInputPixels: number; maxOutputPixels: number };
 
 let session: ort.InferenceSession | undefined;
 let model: ModelConfig | undefined;
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.wasmPaths = new URL("./", import.meta.url).href;
 
-async function decodeImage(image: Blob, maxInputPixels: number): Promise<ImageBitmap> {
+async function decodeImage(image: Blob, maxInputPixels: number, expected?: { width: number; height: number }, resize?: { width: number; height: number }): Promise<ImageBitmap> {
   self.postMessage({ type: "progress", stage: "reading-image-header" });
   const { width, height } = imageDimensions(new Uint8Array(await image.arrayBuffer()));
   if (width * height > maxInputPixels) throw new Error("Image dimensions exceed the configured pixel limit.");
+  // JPEG EXIF rotation can swap header dimensions relative to the decoded bitmap.
+  if (expected && !((width === expected.width && height === expected.height) || (width === expected.height && height === expected.width))) throw new Error("Mask source dimensions do not match the image.");
   self.postMessage({ type: "progress", stage: "decoding-image" });
   let bitmap: ImageBitmap;
-  try { bitmap = await createImageBitmap(image); }
+  try { bitmap = resize ? await createImageBitmap(image, { resizeWidth: resize.width, resizeHeight: resize.height }) : await createImageBitmap(image); }
   catch { throw new Error("Could not decode JPEG, PNG, or WebP image."); }
-  if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > maxInputPixels) {
+  if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > maxInputPixels || resize && (bitmap.width !== resize.width || bitmap.height !== resize.height)) {
     bitmap.close();
-    throw new Error("Image dimensions exceed the configured pixel limit.");
+    throw new Error("Decoded image dimensions do not match the requested size or pixel limit.");
+  }
+  if (expected && !resize && (bitmap.width !== expected.width || bitmap.height !== expected.height)) {
+    bitmap.close();
+    throw new Error("Mask source dimensions do not match the image.");
   }
   return bitmap;
 }
 
-async function exportCutout(image: Blob, mask: Mask, maxInputPixels: number): Promise<Blob> {
-  const bitmap = await decodeImage(image, maxInputPixels);
+async function exportCutout(image: Blob, mask: Mask, maxInputPixels: number, maxOutputPixels: number): Promise<Blob> {
+  const scale = Math.min(1, Math.sqrt(maxOutputPixels / (mask.sourceWidth * mask.sourceHeight)));
+  let width = Math.max(1, Math.floor(mask.sourceWidth * scale));
+  let height = Math.max(1, Math.floor(mask.sourceHeight * scale));
+  if (width * height > maxOutputPixels) {
+    if (width >= height) width = Math.floor(maxOutputPixels / height);
+    else height = Math.floor(maxOutputPixels / width);
+  }
+  const resize = width === mask.sourceWidth && height === mask.sourceHeight ? undefined : { width, height };
+  const bitmap = await decodeImage(image, maxInputPixels, { width: mask.sourceWidth, height: mask.sourceHeight }, resize);
   try {
-    if (bitmap.width !== mask.sourceWidth || bitmap.height !== mask.sourceHeight) throw new Error("Mask source dimensions do not match the image.");
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Canvas 2D is unavailable in the worker.");
@@ -65,7 +78,7 @@ self.onmessage = async (event: MessageEvent<Request>) => {
       return;
     }
     if (request.type === "exportCutout") {
-      const blob = await exportCutout(request.image, request.mask, request.maxInputPixels);
+      const blob = await exportCutout(request.image, request.mask, request.maxInputPixels, request.maxOutputPixels);
       self.postMessage({ type: "exported", blob });
       return;
     }

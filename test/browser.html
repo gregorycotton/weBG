@@ -78,7 +78,7 @@
       await rejects(segmenter.exportCutout(new Blob(["bad"], { type: "image/png" }), allMask), /Invalid or truncated/);
       const truncatedPng = hugeHeader.slice();
       truncatedPng.set([0, 0, 0, 1, 0, 0, 0, 1], 16);
-      await rejects(segmenter.exportCutout(new Blob([truncatedPng], { type: "image/png" }), allMask), /Could not decode/);
+      await rejects(segmenter.exportCutout(new Blob([truncatedPng], { type: "image/png" }), { ...allMask, data: new Uint8Array([255]), width: 1, height: 1, sourceWidth: 1, sourceHeight: 1 }), /Could not decode/);
 
       const mask = await segmenter.segment(image, stage => { result.textContent = stage; });
       if (String(mask.data) !== "0,255,255,255" || mask.sourceWidth !== 2 || mask.sourceHeight !== 2) throw new Error(`Unexpected result: ${[...mask.data]}`);
@@ -90,7 +90,15 @@
       const smallLimit = createSegmenter({ model, maxInputBytes: 10 });
       try { await rejects(smallLimit.exportCutout(new Blob([new Uint8Array(11)], { type: "image/png" }), allMask), /between 1 and 10 bytes/); }
       finally { smallLimit.dispose(); }
-      result.textContent = `PASS: PNG export alignment, transparency, JPEG/WebP, input limits, and repeated WASM inference [${[...mask.data]}]`;
+      const exportLimit = createSegmenter({ model, maxExportPixels: 8 });
+      try {
+        const wideMask = { ...allMask, data: new Uint8Array([255, 255, 255, 255]), sourceWidth: 8, sourceHeight: 4 };
+        await rejects(exportLimit.exportCutout(new Blob(["bad"], { type: "image/png" }), wideMask), /8-pixel limit/);
+        await rejects(exportLimit.exportCutout(image, wideMask, undefined, { maxOutputPixels: 0 }), /positive integer/);
+        const reduced = await exportedPixels(await exportLimit.exportCutout(await imageBlob(8, 4), wideMask, undefined, { maxOutputPixels: 8 }));
+        check(reduced.width === 4 && reduced.height === 2 && reduced.data[3] === 255, "Reduced PNG export failed");
+      } finally { exportLimit.dispose(); }
+      result.textContent = `PASS: PNG export alignment, transparency, resize, export/input limits, JPEG/WebP, and repeated WASM inference [${[...mask.data]}]`;
     } catch (error) {
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;

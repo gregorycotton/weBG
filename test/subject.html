@@ -3,12 +3,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>weBG subject model check</title>
 <label>Image <input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label>
-<label>Model <select id="model"><option value="512">512</option><option value="768">768</option></select></label>
+<label>Model <select id="model"><option value="512">512 (iPhone tested)</option><option value="768">768 (experimental on iPhone)</option></select></label>
 <label><input id="show-preview" type="checkbox"> Show preview</label>
 <button id="run">Run self-hosted subject model</button>
-<button id="export" disabled>Generate full-size PNG</button>
+<label>PNG size <select id="export-size"><option value="full">Full size (up to 16 MP)</option><option value="8000000">Up to 8 MP</option><option value="4000000">Up to 4 MP</option></select></label>
+<button id="export" disabled>Generate PNG</button>
 <a id="download" hidden>Download PNG</a>
 <pre id="result" style="white-space:pre-wrap;overflow-wrap:anywhere">Ready</pre>
+<pre id="previous-run" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
 <canvas id="preview" width="512" height="512" hidden style="max-width:100%;height:auto;background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 24px 24px"></canvas>
 <script type="module">
   import { createSegmenter } from "/dist/index.js";
@@ -16,6 +18,18 @@
   let segmenter, latestImage, latestMask, exportUrl;
   const exportButton = document.querySelector("#export");
   const download = document.querySelector("#download");
+  const lastStageKey = "webg-subject-last-stage";
+  try {
+    const previous = JSON.parse(localStorage.getItem(lastStageKey) || "null");
+    if (previous) document.querySelector("#previous-run").textContent = `Previous run stopped at ${previous.stage} (model ${previous.model}, ${previous.image}; ${previous.time}).`;
+  } catch { /* Storage may be unavailable in private browsing. */ }
+  function remember(stage, image, model) {
+    document.querySelector("#result").textContent = stage;
+    try { localStorage.setItem(lastStageKey, JSON.stringify({ stage, image, model, time: new Date().toLocaleString() })); } catch { /* Keep running without storage. */ }
+  }
+  function clearLastStage() {
+    try { localStorage.removeItem(lastStageKey); } catch { /* Storage may be unavailable. */ }
+  }
   function clearExport() {
     latestImage = latestMask = undefined;
     exportButton.disabled = true;
@@ -30,9 +44,10 @@
     const result = document.querySelector("#result");
     const preview = document.querySelector("#preview");
     clearExport();
-    result.textContent = "Preparing…";
     const modelSize = Number(document.querySelector("#model").value);
     const chosen = document.querySelector("#image").files?.[0];
+    const imageName = chosen?.name || "sample";
+    remember("preparing", imageName, modelSize);
     let image = chosen;
     if (!image) {
       const sample = document.createElement("canvas");
@@ -48,15 +63,17 @@
       if (!response.ok) throw new Error(`Could not load ${modelSize} model manifest (${response.status}).`);
       const manifest = await response.json();
       segmenter ??= createSegmenter({ model: manifest.runtime });
-      const mask = await segmenter.segment(image, stage => { result.textContent = stage; });
+      const mask = await segmenter.segment(image, stage => remember(stage, imageName, modelSize));
       if (mask.width !== modelSize || mask.height !== modelSize || mask.data.length !== modelSize * modelSize || mask.sourceWidth <= 0 || mask.sourceHeight <= 0) throw new Error("Invalid mask metadata");
       const segmentMs = Math.round(performance.now() - start);
       latestImage = image;
       latestMask = mask;
       exportButton.disabled = false;
-      result.textContent = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; segment ${segmentMs} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
+      const passText = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; segment ${segmentMs} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
+      result.textContent = passText;
       if (document.querySelector("#show-preview").checked) {
         try {
+          remember("drawing-preview", imageName, modelSize);
           const maskCanvas = document.createElement("canvas");
           maskCanvas.width = mask.width; maskCanvas.height = mask.height;
           const maskContext = maskCanvas.getContext("2d");
@@ -74,11 +91,14 @@
           context.drawImage(maskCanvas, 0, 0, 512, 512);
           context.globalCompositeOperation = "source-over";
           preview.hidden = false;
+          result.textContent = passText;
         } catch (error) {
-          result.textContent += `\nPreview unavailable: ${error.message}`;
+          result.textContent = `${passText}\nPreview unavailable: ${error.message}`;
         }
       }
+      clearLastStage();
     } catch (error) {
+      clearLastStage();
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;
     }
@@ -88,19 +108,27 @@
     const runButton = document.querySelector("#run");
     const imageInput = document.querySelector("#image");
     const image = latestImage, mask = latestMask;
+    const imageName = image instanceof File ? image.name : "sample";
+    const modelSize = document.querySelector("#model").value;
     exportButton.disabled = true;
     runButton.disabled = imageInput.disabled = true;
     download.hidden = true;
     try {
       const start = performance.now();
-      const png = await segmenter.exportCutout(image, mask, stage => { result.textContent = stage; });
+      const selectedSize = document.querySelector("#export-size").value;
+      remember("starting-png-export", imageName, modelSize);
+      const png = await segmenter.exportCutout(image, mask, stage => remember(stage, imageName, modelSize), selectedSize === "full" ? undefined : { maxOutputPixels: Number(selectedSize) });
+      remember("creating-download", imageName, modelSize);
       if (exportUrl) URL.revokeObjectURL(exportUrl);
       exportUrl = URL.createObjectURL(png);
       download.href = exportUrl;
       download.download = `${image instanceof File ? image.name.replace(/\.[^.]+$/, "") : "sample"}-cutout.png`;
       download.hidden = false;
-      result.textContent = `PNG ready: ${mask.sourceWidth}×${mask.sourceHeight}, ${(png.size / 1024 / 1024).toFixed(1)} MiB; export ${Math.round(performance.now() - start)} ms`;
+      const header = new DataView(await png.slice(16, 24).arrayBuffer());
+      result.textContent = `PNG ready: ${header.getUint32(0)}×${header.getUint32(4)}, ${(png.size / 1024 / 1024).toFixed(1)} MiB; export ${Math.round(performance.now() - start)} ms`;
+      clearLastStage();
     } catch (error) {
+      clearLastStage();
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;
     } finally { exportButton.disabled = runButton.disabled = imageInput.disabled = false; }
