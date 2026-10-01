@@ -1,12 +1,15 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>weBG subject model check</title>
 <label>Image <input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label>
+<label>Model <select id="model"><option value="512">512</option><option value="768">768</option></select></label>
+<label><input id="show-preview" type="checkbox"> Show preview</label>
 <button id="run">Run self-hosted subject model</button>
 <button id="export" disabled>Generate full-size PNG</button>
 <a id="download" hidden>Download PNG</a>
-<pre id="result">Ready</pre>
-<canvas id="preview" width="512" height="512" style="background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 24px 24px"></canvas>
+<pre id="result" style="white-space:pre-wrap;overflow-wrap:anywhere">Ready</pre>
+<canvas id="preview" width="512" height="512" hidden style="max-width:100%;height:auto;background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 24px 24px"></canvas>
 <script type="module">
   import { createSegmenter } from "/dist/index.js";
 
@@ -17,16 +20,18 @@
     latestImage = latestMask = undefined;
     exportButton.disabled = true;
     download.hidden = true;
+    document.querySelector("#preview").hidden = true;
     if (exportUrl) URL.revokeObjectURL(exportUrl);
     exportUrl = undefined;
   }
   document.querySelector("#image").onchange = clearExport;
+  document.querySelector("#model").onchange = () => { clearExport(); segmenter?.dispose(); segmenter = undefined; };
   document.querySelector("#run").onclick = async () => {
     const result = document.querySelector("#result");
     const preview = document.querySelector("#preview");
     clearExport();
     result.textContent = "Preparing…";
-    const manifest = await fetch("/models/birefnet-lite-512.json").then(response => response.json());
+    const modelSize = Number(document.querySelector("#model").value);
     const chosen = document.querySelector("#image").files?.[0];
     let image = chosen;
     if (!image) {
@@ -37,31 +42,42 @@
       context.fillStyle = "#304b79"; context.beginPath(); context.ellipse(128, 135, 68, 92, 0, 0, Math.PI * 2); context.fill();
       image = await new Promise(resolve => sample.toBlob(resolve, "image/png"));
     }
-    segmenter ??= createSegmenter({ model: manifest.runtime });
     const start = performance.now();
     try {
+      const response = await fetch(`/models/birefnet-lite-${modelSize}.json`);
+      if (!response.ok) throw new Error(`Could not load ${modelSize} model manifest (${response.status}).`);
+      const manifest = await response.json();
+      segmenter ??= createSegmenter({ model: manifest.runtime });
       const mask = await segmenter.segment(image, stage => { result.textContent = stage; });
-      if (mask.data.length !== 512 * 512 || mask.sourceWidth <= 0 || mask.sourceHeight <= 0) throw new Error("Invalid mask metadata");
-      const maskCanvas = document.createElement("canvas");
-      maskCanvas.width = mask.width; maskCanvas.height = mask.height;
-      const maskContext = maskCanvas.getContext("2d");
-      const pixels = maskContext.createImageData(mask.width, mask.height);
-      for (let i = 0; i < mask.data.length; i++) {
-        pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = 255;
-        pixels.data[i * 4 + 3] = mask.data[i];
-      }
-      maskContext.putImageData(pixels, 0, 0);
-      const context = preview.getContext("2d");
-      context.clearRect(0, 0, 512, 512);
-      const bitmap = await createImageBitmap(image, { resizeWidth: 512, resizeHeight: 512 });
-      context.drawImage(bitmap, 0, 0, 512, 512); bitmap.close();
-      context.globalCompositeOperation = "destination-in";
-      context.drawImage(maskCanvas, 0, 0, 512, 512);
-      context.globalCompositeOperation = "source-over";
+      if (mask.width !== modelSize || mask.height !== modelSize || mask.data.length !== modelSize * modelSize || mask.sourceWidth <= 0 || mask.sourceHeight <= 0) throw new Error("Invalid mask metadata");
+      const segmentMs = Math.round(performance.now() - start);
       latestImage = image;
       latestMask = mask;
       exportButton.disabled = false;
-      result.textContent = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; ${Math.round(performance.now() - start)} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
+      result.textContent = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; segment ${segmentMs} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
+      if (document.querySelector("#show-preview").checked) {
+        try {
+          const maskCanvas = document.createElement("canvas");
+          maskCanvas.width = mask.width; maskCanvas.height = mask.height;
+          const maskContext = maskCanvas.getContext("2d");
+          const pixels = maskContext.createImageData(mask.width, mask.height);
+          for (let i = 0; i < mask.data.length; i++) {
+            pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = 255;
+            pixels.data[i * 4 + 3] = mask.data[i];
+          }
+          maskContext.putImageData(pixels, 0, 0);
+          const context = preview.getContext("2d");
+          context.clearRect(0, 0, 512, 512);
+          const bitmap = await createImageBitmap(image, { resizeWidth: 512, resizeHeight: 512 });
+          context.drawImage(bitmap, 0, 0, 512, 512); bitmap.close();
+          context.globalCompositeOperation = "destination-in";
+          context.drawImage(maskCanvas, 0, 0, 512, 512);
+          context.globalCompositeOperation = "source-over";
+          preview.hidden = false;
+        } catch (error) {
+          result.textContent += `\nPreview unavailable: ${error.message}`;
+        }
+      }
     } catch (error) {
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;
@@ -76,13 +92,14 @@
     runButton.disabled = imageInput.disabled = true;
     download.hidden = true;
     try {
+      const start = performance.now();
       const png = await segmenter.exportCutout(image, mask, stage => { result.textContent = stage; });
       if (exportUrl) URL.revokeObjectURL(exportUrl);
       exportUrl = URL.createObjectURL(png);
       download.href = exportUrl;
       download.download = `${image instanceof File ? image.name.replace(/\.[^.]+$/, "") : "sample"}-cutout.png`;
       download.hidden = false;
-      result.textContent = `PNG ready: ${mask.sourceWidth}×${mask.sourceHeight}, ${(png.size / 1024 / 1024).toFixed(1)} MiB`;
+      result.textContent = `PNG ready: ${mask.sourceWidth}×${mask.sourceHeight}, ${(png.size / 1024 / 1024).toFixed(1)} MiB; export ${Math.round(performance.now() - start)} ms`;
     } catch (error) {
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;
