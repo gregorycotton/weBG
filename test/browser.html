@@ -78,7 +78,7 @@
       await rejects(segmenter.exportCutout(new Blob(["bad"], { type: "image/png" }), allMask), /Invalid or truncated/);
       const truncatedPng = hugeHeader.slice();
       truncatedPng.set([0, 0, 0, 1, 0, 0, 0, 1], 16);
-      await rejects(segmenter.exportCutout(new Blob([truncatedPng], { type: "image/png" }), { ...allMask, data: new Uint8Array([255]), width: 1, height: 1, sourceWidth: 1, sourceHeight: 1 }), /Could not decode/);
+      await rejects(segmenter.exportCutout(new Blob([truncatedPng], { type: "image/png" }), { ...allMask, data: new Uint8Array([255]), width: 1, height: 1, sourceWidth: 1, sourceHeight: 1, subjectBounds: { x: 0, y: 0, width: 1, height: 1 } }), /Could not decode/);
 
       const mask = await segmenter.segment(image, stage => { result.textContent = stage; });
       if (String(mask.data) !== "0,255,255,255" || mask.sourceWidth !== 2 || mask.sourceHeight !== 2) throw new Error(`Unexpected result: ${[...mask.data]}`);
@@ -86,8 +86,19 @@
       check(inferredCutout.data[3] === 0 && inferredCutout.data[7] === 255 && inferredCutout.data[11] === 0, "Inferred mask export failed");
       const again = await segmenter.segment(image);
       if (String(again.data) !== String(mask.data)) throw new Error("Repeated inference changed the mask");
+      const smallSubjectCanvas = document.createElement("canvas");
+      smallSubjectCanvas.width = smallSubjectCanvas.height = 100;
+      const smallSubjectContext = smallSubjectCanvas.getContext("2d");
+      smallSubjectContext.fillStyle = "black"; smallSubjectContext.fillRect(0, 0, 100, 100);
+      smallSubjectContext.fillStyle = "white"; smallSubjectContext.fillRect(20, 28, 20, 20);
+      const smallSubject = await new Promise(resolve => smallSubjectCanvas.toBlob(resolve, "image/png"));
+      const fallbackStages = [];
+      const recovered = await segmenter.segment(smallSubject, stage => fallbackStages.push(stage));
+      check(fallbackStages.includes("checking-centered-crop") && recovered.width === 1024 && recovered.height === 1024 && recovered.subjectBounds.width > 0, `Empty-mask crop fallback did not return a valid refined mask: ${fallbackStages}; ${JSON.stringify(recovered.subjectBounds)}`);
       const redSource = await imageBlob(4, 4);
-      const blankMask = { ...allMask, data: new Uint8Array(4), sourceWidth: 4, sourceHeight: 4 };
+      const blankMask = { ...allMask, data: new Uint8Array(4), sourceWidth: 4, sourceHeight: 4, subjectBounds: { x: 0, y: 0, width: 0, height: 0 } };
+      await rejects(segmenter.exportCutout(redSource, blankMask), /No subject found/);
+      await rejects(segmenter.exportCutout(redSource, { ...blankMask, subjectBounds: { x: 0, y: 0, width: 5, height: 1 } }), /invalid subject bounds/);
       const detailRegion = { x: 1, y: 1, width: 2, height: 2 };
       const refined = await segmenter.refine(redSource, blankMask, detailRegion, "add");
       check(refined.width === 1024 && refined.height === 1024 && refined.data[512 * 1024 + 512] > 50 && refined.data[512 * 1024 + 100] === 0, "Region refinement failed");
@@ -106,7 +117,7 @@
         const reduced = await exportedPixels(await exportLimit.exportCutout(await imageBlob(8, 4), wideMask, undefined, { maxOutputPixels: 8 }));
         check(reduced.width === 4 && reduced.height === 2 && reduced.data[3] === 255, "Reduced PNG export failed");
       } finally { exportLimit.dispose(); }
-      result.textContent = `PASS: PNG export alignment, transparency, resize, region refinement, export/input limits, JPEG/WebP, and repeated WASM inference [${[...mask.data]}]`;
+      result.textContent = `PASS: PNG export alignment, transparency, resize, empty-mask crop fallback, region refinement, export/input limits, JPEG/WebP, and repeated WASM inference [${[...mask.data]}]`;
     } catch (error) {
       result.textContent = `FAIL: ${error.stack || error}`;
       throw error;

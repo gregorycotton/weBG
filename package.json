@@ -11,6 +11,8 @@
   },
   "files": [
     "dist",
+    "models/birefnet-lite-512.json",
+    "models/yolos-tiny-416.json",
     "README.md",
     "THIRD_PARTY_NOTICES.md"
   ],

@@ -57,8 +57,8 @@ async function main() {
     } else if (request.method === "GET" && /^\/dist\/[\w.-]+$/.test(path)) {
       file = join(root, path);
       type = path.endsWith(".wasm") ? "application/wasm" : "text/javascript";
-    } else if (request.method === "GET" && path === runtime.url) {
-      file = modelFile;
+    } else if (request.method === "GET" && (path === runtime.url || path === runtime.locatorUrl)) {
+      file = path === runtime.url ? modelFile : join(dirname(manifestPath), basename(runtime.locatorUrl));
       type = "application/octet-stream";
     } else {
       response.writeHead(404); response.end("Not found"); return;

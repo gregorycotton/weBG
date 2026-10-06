@@ -22,6 +22,7 @@
   "runtime": {
     "id": "birefnet-lite-512-fp32",
     "url": "/models/birefnet-lite-512.onnx",
+    "locatorUrl": "/models/yolos-tiny-416.onnx",
     "inputName": "input_image",
     "outputName": "logits",
     "inputWidth": 512,

@@ -1,0 +1,13 @@
+{
+  "modelId": "yolos-tiny-416-fp32",
+  "sourceRepository": "https://huggingface.co/hustvl/yolos-tiny",
+  "sourceRevision": "1a00cc14a139ff40bac9aa00c745915cb7b5b751",
+  "sourceWeightsSHA256": "5a6a017a20cb522dd347271fa5bd670467e456176aaccd940090e50985ac6e74",
+  "sourceLicense": "Apache-2.0",
+  "exportMethod": "Transformers YolosForObjectDetection, RGB 416x416, ImageNet normalization, PyTorch ONNX opset 17",
+  "exportToolVersions": { "torch": "2.5.1", "transformers": "4.46.3", "onnx": "1.19.0" },
+  "exportedSHA256": "b12c56df09c905ae7ace9944b7981a88a20e2b9a006f1b052861b05c6e4362c1",
+  "inputShape": [1, 3, 416, 416],
+  "outputShape": [[1, 100, 92], [1, 100, 4]],
+  "precision": "fp32"
+}

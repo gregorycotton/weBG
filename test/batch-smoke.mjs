@@ -38,12 +38,19 @@ async function run() {
 try {
   await mkdir(input);
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(1, 0); header.writeUInt32BE(1, 4);
+  const size = 256;
+  header.writeUInt32BE(size, 0); header.writeUInt32BE(size, 4);
   header[8] = 8; header[9] = 6;
+  const pixels = Buffer.alloc(size * (size * 4 + 1));
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const offset = y * (size * 4 + 1) + 1 + x * 4;
+    const subject = ((x - 128) / 68) ** 2 + ((y - 135) / 92) ** 2 <= 1;
+    pixels.set(subject ? [48, 75, 121, 255] : [240, 232, 216, 255], offset);
+  }
   const png = Buffer.concat([
     Buffer.from("89504e470d0a1a0a", "hex"),
     pngChunk("IHDR", header),
-    pngChunk("IDAT", deflateSync(Buffer.from([0, 255, 0, 0, 255]))),
+    pngChunk("IDAT", deflateSync(pixels)),
     pngChunk("IEND", Buffer.alloc(0))
   ]);
   await writeFile(join(input, "sample.png"), png);
@@ -51,8 +58,8 @@ try {
   assert.deepEqual(await readdir(output), ["sample-CUTOUT.png"]);
   const cutout = await readFile(join(output, "sample-CUTOUT.png"));
   assert.equal(cutout.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
-  assert.equal(cutout.readUInt32BE(16), 1);
-  assert.equal(cutout.readUInt32BE(20), 1);
+  assert.equal(cutout.readUInt32BE(16), size);
+  assert.equal(cutout.readUInt32BE(20), size);
   assert.match(await run(), /SKIP existing sample-CUTOUT\.png/);
   assert.deepEqual(await readFile(join(output, "sample-CUTOUT.png")), cutout);
   console.log("PASS: batch PNG export, naming, and no-overwrite behavior");

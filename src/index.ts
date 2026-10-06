@@ -30,7 +30,9 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   validateModel(options.model);
   const modelUrl = new URL(options.model.url, location.href);
   if (modelUrl.origin !== location.origin) throw new Error("Model must be hosted on the application's origin.");
-  const model = { ...options.model, url: modelUrl.href };
+  const locatorUrl = options.model.locatorUrl ? new URL(options.model.locatorUrl, location.href) : undefined;
+  if (locatorUrl && locatorUrl.origin !== location.origin) throw new Error("Locator must be hosted on the application's origin.");
+  const model = { ...options.model, url: modelUrl.href, locatorUrl: locatorUrl?.href };
   const maxInputBytes = options.maxInputBytes ?? 25 * 1024 * 1024;
   const maxInputPixels = options.maxInputPixels ?? 40_000_000;
   const maxExportPixels = options.maxExportPixels ?? 16_000_000;
@@ -48,6 +50,8 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
 
   function validateMask(mask: Mask): void {
     if (!mask || !(mask.data instanceof Uint8Array) || ![mask.width, mask.height, mask.sourceWidth, mask.sourceHeight].every(value => Number.isSafeInteger(value) && value > 0) || mask.width > 2048 || mask.height > 2048 || mask.width * mask.height > 2_097_152 || mask.sourceWidth * mask.sourceHeight > maxInputPixels || mask.data.length !== mask.width * mask.height) throw new Error("Mask has invalid dimensions or pixel data.");
+    const bounds = mask.subjectBounds;
+    if (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isSafeInteger) || bounds.x < 0 || bounds.y < 0 || bounds.width < 0 || bounds.height < 0 || bounds.x + bounds.width > mask.sourceWidth || bounds.y + bounds.height > mask.sourceHeight) throw new Error("Mask has invalid subject bounds.");
   }
 
   function getWorker(): Worker {
@@ -112,6 +116,7 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
     async exportCutout(image, mask, onProgress, options) {
       validateImage(image);
       validateMask(mask);
+      if (!mask.subjectBounds.width || !mask.subjectBounds.height || !mask.data.some(alpha => alpha >= 16)) throw new Error("No subject found in mask; refine it before exporting.");
       const maxOutputPixels = options?.maxOutputPixels;
       if (maxOutputPixels !== undefined && (!Number.isSafeInteger(maxOutputPixels) || maxOutputPixels <= 0)) throw new Error("maxOutputPixels must be a positive integer.");
       const outputPixels = Math.min(mask.sourceWidth * mask.sourceHeight, maxOutputPixels ?? Number.MAX_SAFE_INTEGER);

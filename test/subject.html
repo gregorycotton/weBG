@@ -3,6 +3,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>weBG subject model check</title>
 <label>Image <input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label>
+<label>Local test fixture <select id="fixture"><option value="">Built-in sample or chosen file</option><option value="/img-tests/photosets/photoset-beta-holdout-2/vehicle-03.jpg">Rusted car (locator)</option><option value="/img-tests/photosets/photoset-beta-holdout-2/boat-01.jpg">Sailboat (locator)</option><option value="/img-tests/photosets/photoset-1/hamburger.jpg">Hamburger (control)</option><option value="/img-tests/photosets/photoset-1/skeleton.jpg">Skeleton (8 MP export)</option></select></label>
 <label>Model <select id="model"><option value="512">512 (iPhone tested)</option><option value="768">768 (unsupported on iPhone 16)</option></select></label>
 <label><input id="show-preview" type="checkbox"> Show preview</label>
 <label><input id="show-original" type="checkbox"> Show original for region selection</label>
@@ -17,7 +18,7 @@
   <label>Action <select id="refine-mode"><option value="replace">Replace detail</option><option value="add">Add subject</option></select></label>
   <button id="refine" disabled>Refine selected region</button>
 </fieldset>
-<label>PNG size <select id="export-size"><option value="full">Full size (up to 16 MP)</option><option value="8000000">Up to 8 MP</option><option value="4000000">Up to 4 MP</option></select></label>
+<label>PNG size <select id="export-size"><option value="full">Full size (up to 16 MP)</option><option value="8000000" selected>Up to 8 MP</option><option value="4000000">Up to 4 MP</option></select></label>
 <button id="export" disabled>Generate PNG</button>
 <a id="download" hidden>Download PNG</a>
 <pre id="result" style="white-space:pre-wrap;overflow-wrap:anywhere">Ready</pre>
@@ -33,6 +34,7 @@
   const exportButton = document.querySelector("#export");
   const refineButton = document.querySelector("#refine");
   const modelInput = document.querySelector("#model");
+  const fixtureInput = document.querySelector("#fixture");
   const download = document.querySelector("#download");
   const preview = document.querySelector("#preview");
   const previewWrap = document.querySelector("#preview-wrap");
@@ -45,11 +47,13 @@
   } catch { /* Storage may be unavailable in private browsing. */ }
   function remember(stage, image, model) {
     document.querySelector("#result").textContent = stage;
+    console.info(`[weBG] ${image} / ${model}: ${stage}`);
     try { localStorage.setItem(lastStageKey, JSON.stringify({ stage, image, model, time: new Date().toLocaleString() })); } catch { /* Keep running without storage. */ }
   }
   function clearLastStage() {
     try { localStorage.removeItem(lastStageKey); } catch { /* Storage may be unavailable. */ }
   }
+  function describeError(error) { return `${String(error)}${error?.stack ? `\n${error.stack}` : ""}`; }
   function clearDownload() {
     download.hidden = true;
     if (exportUrl) URL.revokeObjectURL(exportUrl);
@@ -118,21 +122,27 @@
   }
   document.querySelector("#show-preview").onchange = () => { drawPreview().catch(error => { document.querySelector("#result").textContent += `\nPreview unavailable: ${error.message}`; }); };
   document.querySelector("#show-original").onchange = () => { drawPreview().catch(error => { document.querySelector("#result").textContent += `\nPreview unavailable: ${error.message}`; }); };
-  document.querySelector("#image").onchange = clearExport;
+  document.querySelector("#image").onchange = () => { fixtureInput.value = ""; clearExport(); };
+  fixtureInput.onchange = () => { document.querySelector("#image").value = ""; clearExport(); };
   document.querySelector("#model").onchange = () => { clearExport(); segmenter?.dispose(); segmenter = undefined; };
   document.querySelector("#run").onclick = async () => {
     const result = document.querySelector("#result");
     const runButton = document.querySelector("#run");
     const imageInput = document.querySelector("#image");
-    runButton.disabled = imageInput.disabled = modelInput.disabled = true;
+    runButton.disabled = imageInput.disabled = fixtureInput.disabled = modelInput.disabled = true;
     clearExport();
     const modelSize = Number(modelInput.value);
     const chosen = imageInput.files?.[0];
-    const imageName = chosen?.name || "sample";
+    const imageName = chosen?.name || fixtureInput.value.split("/").at(-1) || "sample";
     remember("preparing", imageName, modelSize);
     const start = performance.now();
     try {
       let image = chosen;
+      if (!image && fixtureInput.value) {
+        const response = await fetch(fixtureInput.value);
+        if (!response.ok) throw new Error(`Could not load local fixture (${response.status}).`);
+        image = await response.blob();
+      }
       if (!image) {
         const sample = document.createElement("canvas");
         sample.width = 256; sample.height = 256;
@@ -141,18 +151,20 @@
         context.fillStyle = "#304b79"; context.beginPath(); context.ellipse(128, 135, 68, 92, 0, 0, Math.PI * 2); context.fill();
         image = await new Promise(resolve => sample.toBlob(resolve, "image/png"));
       }
-      const response = await fetch(`/models/birefnet-lite-${modelSize}.json`);
+      const response = await fetch(`/models/birefnet-lite-${modelSize}.json`, { cache: "no-store" });
       if (!response.ok) throw new Error(`Could not load ${modelSize} model manifest (${response.status}).`);
       const manifest = await response.json();
       segmenter ??= createSegmenter({ model: manifest.runtime });
-      const mask = await segmenter.segment(image, stage => remember(stage, imageName, modelSize));
-      if (mask.width !== modelSize || mask.height !== modelSize || mask.data.length !== modelSize * modelSize || mask.sourceWidth <= 0 || mask.sourceHeight <= 0) throw new Error("Invalid mask metadata");
+      const stages = [];
+      const mask = await segmenter.segment(image, stage => { stages.push(stage); remember(stage, imageName, modelSize); });
+      if (!mask.width || !mask.height || mask.data.length !== mask.width * mask.height || mask.sourceWidth <= 0 || mask.sourceHeight <= 0) throw new Error("Invalid mask metadata");
       const segmentMs = Math.round(performance.now() - start);
       latestImage = image;
       latestMask = mask;
-      exportButton.disabled = false;
+      const hasSubject = Boolean(mask.subjectBounds.width && mask.subjectBounds.height);
+      exportButton.disabled = !hasSubject;
       refineButton.disabled = modelSize !== 512;
-      const passText = `PASS: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; segment ${segmentMs} ms; bounds ${JSON.stringify(mask.subjectBounds)}`;
+      const passText = `${hasSubject ? "PASS" : "NO SUBJECT (select a region and Add subject)"}: ${mask.width}×${mask.height} mask for ${mask.sourceWidth}×${mask.sourceHeight} source; segment ${segmentMs} ms; bounds ${JSON.stringify(mask.subjectBounds)}\nLocator configured: ${Boolean(manifest.runtime.locatorUrl)}; stages: ${stages.join(" → ")}`;
       result.textContent = passText;
       if (document.querySelector("#show-preview").checked) {
         try {
@@ -163,26 +175,28 @@
           result.textContent = `${passText}\nPreview unavailable: ${error.message}`;
         }
       }
+      console.info(`[weBG] ${imageName} / ${modelSize}: ${result.textContent}`);
       clearLastStage();
     } catch (error) {
       clearLastStage();
-      result.textContent = `FAIL: ${error.stack || error}`;
+      result.textContent = `FAIL: ${describeError(error)}`;
+      console.error(`[weBG] ${imageName} / ${modelSize}: ${result.textContent}`);
       throw error;
-    } finally { runButton.disabled = imageInput.disabled = modelInput.disabled = false; }
+    } finally { runButton.disabled = imageInput.disabled = fixtureInput.disabled = modelInput.disabled = false; }
   };
   refineButton.onclick = async () => {
     const result = document.querySelector("#result");
     const runButton = document.querySelector("#run");
     const imageInput = document.querySelector("#image");
     const image = latestImage, mask = latestMask;
-    const imageName = image instanceof File ? image.name : "sample";
+    const imageName = image instanceof File ? image.name : fixtureInput.value.split("/").at(-1) || "sample";
     const modelSize = document.querySelector("#model").value;
     try {
       const selected = selection();
       const x = Math.floor(selected.x * mask.sourceWidth / 100), y = Math.floor(selected.y * mask.sourceHeight / 100);
       const region = { x, y, width: Math.min(mask.sourceWidth, Math.ceil((selected.x + selected.width) * mask.sourceWidth / 100)) - x, height: Math.min(mask.sourceHeight, Math.ceil((selected.y + selected.height) * mask.sourceHeight / 100)) - y };
       const mode = document.querySelector("#refine-mode").value;
-      refineButton.disabled = exportButton.disabled = runButton.disabled = imageInput.disabled = modelInput.disabled = true;
+      refineButton.disabled = exportButton.disabled = runButton.disabled = imageInput.disabled = fixtureInput.disabled = modelInput.disabled = true;
       const start = performance.now();
       remember("starting-refinement", imageName, modelSize);
       const refined = await segmenter.refine(image, mask, region, mode, stage => remember(`refining-${stage}`, imageName, modelSize));
@@ -197,18 +211,18 @@
       clearLastStage();
     } catch (error) {
       clearLastStage();
-      result.textContent = `FAIL: ${error.stack || error}`;
-    } finally { refineButton.disabled = false; exportButton.disabled = runButton.disabled = imageInput.disabled = modelInput.disabled = false; }
+      result.textContent = `FAIL: ${describeError(error)}`;
+    } finally { refineButton.disabled = false; exportButton.disabled = !latestMask?.subjectBounds.width || !latestMask?.subjectBounds.height; runButton.disabled = imageInput.disabled = fixtureInput.disabled = modelInput.disabled = false; }
   };
   exportButton.onclick = async () => {
     const result = document.querySelector("#result");
     const runButton = document.querySelector("#run");
     const imageInput = document.querySelector("#image");
     const image = latestImage, mask = latestMask;
-    const imageName = image instanceof File ? image.name : "sample";
+    const imageName = image instanceof File ? image.name : fixtureInput.value.split("/").at(-1) || "sample";
     const modelSize = document.querySelector("#model").value;
     exportButton.disabled = refineButton.disabled = true;
-    runButton.disabled = imageInput.disabled = modelInput.disabled = true;
+    runButton.disabled = imageInput.disabled = fixtureInput.disabled = modelInput.disabled = true;
     download.hidden = true;
     try {
       const start = performance.now();
@@ -219,16 +233,18 @@
       if (exportUrl) URL.revokeObjectURL(exportUrl);
       exportUrl = URL.createObjectURL(png);
       download.href = exportUrl;
-      download.download = `${image instanceof File ? image.name.replace(/\.[^.]+$/, "") : "sample"}-cutout.png`;
+      download.download = `${imageName.replace(/\.[^.]+$/, "")}-cutout.png`;
       download.hidden = false;
       const header = new DataView(await png.slice(16, 24).arrayBuffer());
       result.textContent = `PNG ready: ${header.getUint32(0)}×${header.getUint32(4)}, ${(png.size / 1024 / 1024).toFixed(1)} MiB; export ${Math.round(performance.now() - start)} ms`;
+      console.info(`[weBG] ${imageName} / ${modelSize}: ${result.textContent}`);
       clearLastStage();
     } catch (error) {
       clearLastStage();
-      result.textContent = `FAIL: ${error.stack || error}`;
+      result.textContent = `FAIL: ${describeError(error)}`;
+      console.error(`[weBG] ${imageName} / ${modelSize}: ${result.textContent}`);
       throw error;
-    } finally { exportButton.disabled = runButton.disabled = imageInput.disabled = modelInput.disabled = false; refineButton.disabled = modelSize !== "512"; }
+    } finally { exportButton.disabled = !latestMask?.subjectBounds.width || !latestMask?.subjectBounds.height; runButton.disabled = imageInput.disabled = fixtureInput.disabled = modelInput.disabled = false; refineButton.disabled = modelSize !== "512"; }
   };
   window.addEventListener("pagehide", () => { clearExport(); segmenter?.dispose(); });
 </script>

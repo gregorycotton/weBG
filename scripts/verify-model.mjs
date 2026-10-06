@@ -13,6 +13,13 @@ export async function verifyModel(path = "models/birefnet-lite-512.json") {
   assert.equal(hash.digest("hex"), manifest.exportedSHA256, "Model SHA-256 differs from the provenance manifest");
   assert.deepEqual(manifest.inputShape, [1, 3, manifest.runtime.inputHeight, manifest.runtime.inputWidth]);
   assert.deepEqual(manifest.outputShape, [1, 1, manifest.runtime.inputHeight, manifest.runtime.inputWidth]);
+  if (manifest.runtime.locatorUrl) {
+    assert.match(manifest.runtime.locatorUrl, /^\/models\/[\w.-]+\.onnx$/);
+    const locatorManifest = JSON.parse(readFileSync(join(dirname(manifestPath), basename(manifest.runtime.locatorUrl).replace(/\.onnx$/, ".json")), "utf8"));
+    const locatorHash = createHash("sha256");
+    for await (const chunk of createReadStream(join(dirname(manifestPath), basename(manifest.runtime.locatorUrl)))) locatorHash.update(chunk);
+    assert.equal(locatorHash.digest("hex"), locatorManifest.exportedSHA256, "Locator SHA-256 differs from the provenance manifest");
+  }
   return manifest;
 }
 

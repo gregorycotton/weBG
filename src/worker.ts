@@ -1,5 +1,6 @@
 import * as ort from "onnxruntime-web/wasm";
 import { imageDimensions } from "./image";
+import { locateWeakSubject } from "./locator";
 import { mergeRefinement, outputToMask, pixelsToTensor, type Mask, type ModelConfig, type Rect, type RefineMode } from "./mask";
 
 type Request =
@@ -40,15 +41,18 @@ async function decodeImage(image: Blob, maxInputPixels: number, expected?: { wid
 }
 
 async function infer(bitmap: ImageBitmap, sourceWidth: number, sourceHeight: number): Promise<Mask> {
-  if (!session || !model) throw new Error("Model is not initialized.");
-  const canvas = new OffscreenCanvas(model.inputWidth, model.inputHeight);
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("Canvas 2D is unavailable in the worker.");
-  context.fillStyle = "#fff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-  const input = new ort.Tensor("float32", pixelsToTensor(pixels, canvas.width, canvas.height, model.mean, model.std), [1, 3, canvas.height, canvas.width]);
+  let input: ort.Tensor;
+  try {
+    if (!session || !model) throw new Error("Model is not initialized.");
+    const canvas = new OffscreenCanvas(model.inputWidth, model.inputHeight);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas 2D is unavailable in the worker.");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    input = new ort.Tensor("float32", pixelsToTensor(pixels, canvas.width, canvas.height, model.mean, model.std), [1, 3, canvas.height, canvas.width]);
+  } finally { bitmap.close(); }
   self.postMessage({ type: "progress", stage: "running-model" });
   try {
     const results = await session.run({ [model.inputName]: input });
@@ -58,6 +62,42 @@ async function infer(bitmap: ImageBitmap, sourceWidth: number, sourceHeight: num
       return outputToMask(output.data, model.inputWidth, model.inputHeight, sourceWidth, sourceHeight, model.output);
     } finally { for (const result of Object.values(results)) result.dispose(); }
   } finally { input.dispose(); }
+}
+
+async function inferRegion(image: Blob, region: Rect): Promise<Mask> {
+  if (!model) throw new Error("Model is not initialized.");
+  let bitmap: ImageBitmap;
+  try { bitmap = await createImageBitmap(image, region.x, region.y, region.width, region.height, { resizeWidth: model.inputWidth, resizeHeight: model.inputHeight }); }
+  catch { throw new Error("Could not decode the selected image region."); }
+  if (bitmap.width !== model.inputWidth || bitmap.height !== model.inputHeight) {
+    bitmap.close();
+    throw new Error("Decoded region size does not match the model.");
+  }
+  return infer(bitmap, region.width, region.height);
+}
+
+async function locate(image: Blob, sourceWidth: number, sourceHeight: number): Promise<Rect | undefined> {
+  if (!model?.locatorUrl) return;
+  self.postMessage({ type: "progress", stage: "locating-subject" });
+  const bitmap = await createImageBitmap(image, { resizeWidth: 416, resizeHeight: 416 });
+  let input: ort.Tensor;
+  try {
+    const canvas = new OffscreenCanvas(416, 416);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas 2D is unavailable in the worker.");
+    context.drawImage(bitmap, 0, 0, 416, 416);
+    input = new ort.Tensor("float32", pixelsToTensor(context.getImageData(0, 0, 416, 416).data, 416, 416, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]), [1, 3, 416, 416]);
+  } finally { bitmap.close(); }
+  let locator: ort.InferenceSession | undefined;
+  try {
+    locator = await ort.InferenceSession.create(model.locatorUrl, { executionProviders: ["wasm"] });
+    const result = await locator.run({ pixel_values: input });
+    try {
+      const logits = result.logits?.data, boxes = result.pred_boxes?.data;
+      if (!(logits instanceof Float32Array) || !(boxes instanceof Float32Array)) throw new Error("Locator output does not match its configuration.");
+      return locateWeakSubject(logits, boxes, sourceWidth, sourceHeight);
+    } finally { for (const output of Object.values(result)) output.dispose(); }
+  } finally { input.dispose(); await locator?.release(); }
 }
 
 async function exportCutout(image: Blob, mask: Mask, maxInputPixels: number, maxOutputPixels: number): Promise<Blob> {
@@ -114,24 +154,83 @@ self.onmessage = async (event: MessageEvent<Request>) => {
       const dimensions = await readDimensions(request.image, request.maxInputPixels);
       if (!((dimensions.width === request.mask.sourceWidth && dimensions.height === request.mask.sourceHeight) || (dimensions.width === request.mask.sourceHeight && dimensions.height === request.mask.sourceWidth))) throw new Error("Mask source dimensions do not match the image.");
       self.postMessage({ type: "progress", stage: "decoding-image-region" });
-      let bitmap: ImageBitmap;
-      try { bitmap = await createImageBitmap(request.image, request.region.x, request.region.y, request.region.width, request.region.height, { resizeWidth: model.inputWidth, resizeHeight: model.inputHeight }); }
-      catch { throw new Error("Could not decode the selected image region."); }
-      try {
-        if (bitmap.width !== model.inputWidth || bitmap.height !== model.inputHeight) throw new Error("Decoded region size does not match the model.");
-        const detail = await infer(bitmap, request.region.width, request.region.height);
-        if (!detail.subjectBounds.width || !detail.subjectBounds.height) throw new Error("No subject found in the selected region.");
-        self.postMessage({ type: "progress", stage: "merging-mask" });
-        const refined = mergeRefinement(request.mask, detail, request.region, request.mode);
-        self.postMessage({ type: "done", mask: refined }, { transfer: [refined.data.buffer] });
-      } finally { bitmap.close(); }
+      const detail = await inferRegion(request.image, request.region);
+      if (!detail.subjectBounds.width || !detail.subjectBounds.height) throw new Error("No subject found in the selected region.");
+      self.postMessage({ type: "progress", stage: "merging-mask" });
+      const refined = mergeRefinement(request.mask, detail, request.region, request.mode);
+      self.postMessage({ type: "done", mask: refined }, { transfer: [refined.data.buffer] });
       return;
     }
     const bitmap = await decodeImage(request.image, request.maxInputPixels);
+    const sourceWidth = bitmap.width, sourceHeight = bitmap.height;
+    // TODO: A centered crop can miss off-center subjects; use a qualified locator before expanding this fallback.
+    const region = sourceWidth > model.inputWidth || sourceHeight > model.inputHeight ? {
+      x: Math.floor(sourceWidth * 0.1), y: Math.floor(sourceHeight * 0.2),
+      width: Math.floor(sourceWidth * 0.8), height: Math.floor(sourceHeight * 0.7),
+    } : undefined;
+    let centeredCrop: ImageBitmap | undefined;
     try {
-      const mask = await infer(bitmap, bitmap.width, bitmap.height);
+      if (region) {
+        try {
+          centeredCrop = await createImageBitmap(bitmap, region.x, region.y, region.width, region.height, { resizeWidth: model.inputWidth, resizeHeight: model.inputHeight });
+          if (centeredCrop.width !== model.inputWidth || centeredCrop.height !== model.inputHeight) {
+            centeredCrop.close(); centeredCrop = undefined;
+          }
+        } catch { /* A blank result can still retry the crop from the source Blob. */ }
+      }
+      let mask = await infer(bitmap, sourceWidth, sourceHeight);
+      if (!mask.subjectBounds.width && region) {
+        self.postMessage({ type: "progress", stage: "checking-centered-crop" });
+        let detail: Mask | undefined;
+        try {
+          if (centeredCrop) {
+            const crop = centeredCrop; centeredCrop = undefined;
+            detail = await infer(crop, region.width, region.height);
+          } else detail = await inferRegion(request.image, region);
+        } catch { /* A failed optional crop leaves the original mask. */ }
+        if (detail) {
+          let strong = 0;
+          for (const alpha of detail.data) if (alpha >= 16) strong++;
+          if (strong >= detail.data.length * 0.02) mask = mergeRefinement(mask, detail, region, "add");
+        }
+      }
+      // TODO: This deliberately checks only sparse masks. Recovering a large wrong subject
+      // (for example a crane instead of a boat) needs a semantic choice UI or a stronger joint model.
+      let occupied = 0;
+      for (const alpha of mask.data) if (alpha >= 16) occupied++;
+      if (model.locatorUrl && occupied < mask.data.length * 0.03) {
+        let located: Rect | undefined;
+        try {
+          located = await locate(request.image, sourceWidth, sourceHeight);
+          if (!located) self.postMessage({ type: "progress", stage: "locator-no-match" });
+        }
+        catch (error) {
+          self.postMessage({ type: "progress", stage: `locator-failed: ${error instanceof Error ? error.message : String(error)}` });
+        }
+        if (located) {
+          self.postMessage({ type: "progress", stage: `locator-found: ${JSON.stringify(located)}` });
+          let detail: Mask | undefined;
+          try { detail = await inferRegion(request.image, located); }
+          catch (error) {
+            self.postMessage({ type: "progress", stage: `locator-crop-failed: ${error instanceof Error ? error.message : String(error)}` });
+          }
+          if (detail) {
+            let strong = 0;
+            for (const alpha of detail.data) if (alpha >= 16) strong++;
+            if (strong >= detail.data.length * 0.02) {
+              const merged = mergeRefinement(mask, detail, located, "add");
+              let rescued = 0;
+              for (const alpha of merged.data) if (alpha >= 16) rescued++;
+              if (rescued > occupied * 2 && rescued >= merged.data.length * 0.005) {
+                mask = merged;
+                self.postMessage({ type: "progress", stage: "locator-rescue-applied" });
+              } else self.postMessage({ type: "progress", stage: "locator-rescue-rejected" });
+            } else self.postMessage({ type: "progress", stage: "locator-crop-weak" });
+          }
+        }
+      }
       self.postMessage({ type: "done", mask }, { transfer: [mask.data.buffer] });
-    } finally { bitmap.close(); }
+    } finally { centeredCrop?.close(); }
   } catch (error) {
     self.postMessage({ type: "error", error: error instanceof Error ? error.message : String(error) });
   }

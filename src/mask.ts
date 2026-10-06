@@ -19,6 +19,7 @@ export type RefineMode = "replace" | "add";
 export interface ModelConfig {
   id: string;
   url: string;
+  locatorUrl?: string;
   inputName: string;
   outputName: string;
   inputWidth: number;
@@ -33,6 +34,7 @@ export function validateModel(model: ModelConfig): void {
   if (![model.inputWidth, model.inputHeight].every(value => Number.isInteger(value) && value > 0 && value <= 2048) || model.inputWidth * model.inputHeight > 2_097_152) throw new Error("Model input exceeds its dimension or pixel budget.");
   if (!Array.isArray(model.mean) || !Array.isArray(model.std) || model.mean.length !== 3 || model.std.length !== 3 || ![...model.mean, ...model.std].every(Number.isFinite) || model.std.some(value => value <= 0)) throw new Error("Model normalization must contain three finite means and positive standard deviations.");
   if (model.output !== "logits" && model.output !== "probabilities") throw new Error("Model output must be logits or probabilities.");
+  if (model.locatorUrl !== undefined && (typeof model.locatorUrl !== "string" || !model.locatorUrl)) throw new Error("Locator URL must be a nonempty string.");
 }
 
 export function pixelsToTensor(pixels: Uint8ClampedArray, width: number, height: number, mean: ModelConfig["mean"], std: ModelConfig["std"]): Float32Array {
