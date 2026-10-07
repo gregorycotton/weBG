@@ -1,9 +1,11 @@
 # weBG
 
-weBG is a browser-side, one-click background remover for JPEG, PNG, and WebP images. This **desktop beta** is intended for an image editor where a user chooses one photo and clicks **Remove background**. The library returns a transparent PNG `Blob` or an explicit error. It does not upload the image or use IMG.LY.
+weBG is a browser-side, one-click background remover for JPEG, PNG, and WebP images. This **desktop beta** is intended for an image editor where a user chooses one photo and clicks **Remove background**. The library returns a transparent PNG `Blob` or an explicit error.
 
 The supported photo has one visually dominant person, animal, vehicle, boat, flower, or discrete object. Automatic selection of a detached ball, skateboard, second subject, or whole landscape is outside this beta's promise. Mobile browsers and manual refinement are not qualified for this release.
 
+
+![Original photo beside the automatic transparent cutout](docs/weBG-README.png)
 
 ## Use it
 
