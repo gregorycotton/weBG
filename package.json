@@ -1,7 +1,8 @@
 {
   "name": "webg",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {
@@ -14,8 +15,7 @@
     "models/birefnet-lite-512.json",
     "models/yolos-tiny-416.json",
     "README.md",
-    "BETA_RELEASE.md",
-    "THIRD_PARTY_NOTICES.md"
+    "LICENSES.md"
   ],
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs && tsc --declaration --emitDeclarationOnly --noEmit false --outDir dist",

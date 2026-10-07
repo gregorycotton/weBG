@@ -1,130 +1,75 @@
 # weBG
 
-Standalone, browser-side image segmentation library. It returns a soft, one-byte-per-pixel subject mask and the mapping back to the source image. The browser editor is not part of this package.
+weBG is a browser-side, one-click background remover for JPEG, PNG, and WebP images. This **desktop beta** is intended for an image editor where a user chooses one photo and clicks **Remove background**. The library returns a transparent PNG `Blob` or an explicit error. It does not upload the image or use IMG.LY.
 
-The first beta is a **one-click laptop/desktop** background remover; see [the frozen release decision and qualification result](BETA_RELEASE.md). Mobile and manual refinement are outside that first product promise.
+The supported photo has one visually dominant person, animal, vehicle, boat, flower, or discrete object. Automatic selection of a detached ball, skateboard, second subject, or whole landscape is outside this beta's promise. Mobile browsers and manual refinement are not qualified for this release.
 
-The reference backend is single-threaded ONNX Runtime Web WASM. The runtime and model are self-hosted, with no IMG.LY dependency. Image bytes are processed in a worker; the library does not upload them.
+weBG's original code has no public license. This private beta is for use by the repository owner in their own applications; others need permission to reuse or redistribute that code. The third-party runtime and models keep their separate licenses, listed at the end of this README.
 
-## Current status
+## Use it
 
-- Working browser path: inspect JPEG, PNG, or WebP dimensions before decode; resize to the model's fixed input; run WASM inference; return a soft alpha mask and subject bounds in source coordinates. An optional PNG export applies the mask to the original image.
-- Model candidates: our fixed-shape 512, 768, and 1024 FP32 ONNX exports of the same official BiRefNet_lite weights. The 512 model remains the default and ran on an iPhone 16. The 768 model completed a 50-photo Chrome batch but exceeded the iPhone Safari WebContent memory limit even on the built-in sample; do not use it on that device. The 1024 model failed during Chrome WASM inference with `std::bad_alloc` and is not a supported browser option.
-- Each model manifest records the source revision, upstream and exported SHA-256 hashes, license, export method, tool versions, and tensor shapes. The 512 runtime optionally uses our Apache-2.0-labeled YOLOS-Tiny export to locate people, boats, and cars when its initial mask is sparse. Its manifest is included in the local npm tarball. Both `.onnx` files are excluded from Git and the npm package; host them as separate static assets.
-- This is a functional baseline, not yet a qualified replacement for every IMG.LY image. The 512 review found 13/50 images with at least one failed review axis; the 768 review still has scene-selection and disconnected-subject failures. On iPhone 16, 512 segmentation worked on several photos and an up-to-8-MP export of the large skeleton photo completed. An earlier full-size export of that 39.5-megapixel photo reloaded Safari; the current 16-million-pixel export limit now rejects it before decoding.
+Install the local beta tarball to obtain the library files, then copy its `dist/` directory and two model manifests from `node_modules/webg/` into your site's static assets. The example below imports that **hosted copy** of `index.js`; it does not use a bundler's bare `webg` import. Host the two ONNX files separately on the **same origin** as the page. Use these paths, or adjust the manifest URLs for your host:
 
-## Build and try it
-
-Requires Node.js with `--experimental-strip-types` support and Python 3 for the local static server.
-
-```sh
-npm install
-npm test
-npm run build
-npm run verify:model
-python3 -m http.server 8765 --bind 127.0.0.1
+```text
+/webg/dist/index.js
+/webg/dist/worker.js
+/webg/dist/ort-wasm-simd-threaded.mjs
+/webg/dist/ort-wasm-simd-threaded.wasm
+/models/birefnet-lite-512.json
+/models/birefnet-lite-512.onnx
+/models/yolos-tiny-416.json
+/models/yolos-tiny-416.onnx
 ```
 
-Open `http://127.0.0.1:8765/test/subject.html` and choose an image, or run the built-in synthetic sample. Click **Run self-hosted subject model**, choose full-size or a smaller PNG, then **Generate PNG** and **Download PNG** to inspect the actual export. An empty mask reports **NO SUBJECT**, disables PNG export, and leaves 512 refinement available. To improve a region, enable **Show preview**, drag a box on the image, and click **Refine selected region**. Choose **Replace detail** for gaps and edges, or **Add subject** for a missing object; **Show original for region selection** helps locate missing objects. The full-size option reports a clear error for sources over 16 million pixels. If Safari reloads during a run, the page displays the last reported stage when it reopens, provided browser storage is available. `test/browser.html` checks export geometry, transparency, resizing, refinement, malformed inputs, and the worker and WASM runtime using a tiny deterministic ONNX model. Serve over HTTP; `file://` will not work for the worker and WASM asset requests.
+Keep `worker.js` and the WASM files adjacent to `index.js`. Deploy the library build, manifests, and ONNX files as one versioned set so a cached worker or manifest cannot be mixed with another model version.
 
-## Batch cutouts for review
-
-Run `npm run batch` from the weBG root for the 512 model, or `npm run batch:768` for the 768 model. Both use the existing `img-tests/photosets/photoset-1/` set and write to `img-tests/outputs/outputs-1/` and `img-tests/outputs/outputs-768/` respectively. Each JPEG, PNG, or WebP produces `<original-name>-CUTOUT.png` (for example, `dog.jpg` becomes `dog-CUTOUT.png`). The batch reuses one model session, skips output files that already exist, and reports failures and timings per image. It does not alter input photos or existing cutouts. The command uses a separate headless Google Chrome instance and requires Chrome to be installed. It builds the library and checks the selected model hash before processing. Pass explicit input and output paths when testing another set, including `photoset-beta`.
-
-To test the batch command without touching either folder, run `npm run test:batch`. It uses a temporary synthetic image and removes its results afterward. The script also accepts input, output, and optional model-manifest paths: `npm run batch -- /path/to/input /path/to/output models/birefnet-lite-768.json`.
-
-If a binary is missing, generate it as described below. `npm run verify:model` checks both default 512 assets; `npm run verify:model -- models/birefnet-lite-768.json` checks 768. Publish `dist/index.js`, `dist/worker.js`, both `dist/ort-wasm-simd-threaded.*` files, the chosen segmentation model, and its manifest on the same origin. For the default 512 rescue path, also host `models/yolos-tiny-416.onnx` and its manifest. Keep the worker and WASM files adjacent to `index.js`. Model URLs in the manifests use `/models/`; adjust them for the host path if necessary.
-
-## API
-
-For a one-click desktop editor, pass the selected image `Blob` to `removeBackground()` and use the returned transparent PNG `Blob`. A no-subject result rejects with an error; it never returns a silently blank PNG. Keep one segmenter alive across photos to reuse the model session. This first beta path does not require a subject-selection or refinement UI.
-
-```js
-import { createSegmenter } from "/dist/index.js";
-
-const manifest = await fetch("/models/birefnet-lite-512.json").then(r => r.json());
-const segmenter = createSegmenter({ model: manifest.runtime });
-try {
-  const pngBlob = await segmenter.removeBackground(imageBlob, undefined, { maxOutputPixels: 8_000_000 });
-  // Insert pngBlob into the editor or create an object URL for display.
-} finally {
-  segmenter.dispose();
-}
-```
-
-`removeBackground()` is the convenience form of `segment()` followed by `exportCutout()`; callers can still use those two operations when they need a native-resolution mask. The mask contains row-major, soft `Uint8Array` alpha and an explicit source-coordinate mapping. Only one operation may run on a segmenter at a time; a concurrent call rejects. `initialize()` can preload the model. `exportCutout()` can also use a previously saved mask without loading the model; it rejects empty masks instead of writing a blank PNG. `dispose()` terminates its worker and rejects in-flight work. The default input limits are 25 MiB compressed and 40 million decoded pixels; pass `maxInputBytes` or `maxInputPixels` to tighten them. Full-size PNG export has a separate 16-million-pixel limit, configurable with `maxExportPixels` in `createSegmenter()`. The one-click method automatically scales larger images to that limit; pass a lower per-call `maxOutputPixels` to request a smaller PNG. The sample above sets an 8 MP cap. JPEG, PNG, and WebP dimensions are checked from the file header before full decode. Invalid, truncated, oversized, and mismatched mask inputs raise an error. Model files must be same-origin.
-
-`segmenter.refine(imageBlob, mask, selectedRegion, "replace" | "add")` makes one more inference with the segmenter's configured model on an explicitly selected source-pixel rectangle, then returns a new mask. The original mask stays unchanged. `replace` blends local detail into that rectangle; `add` preserves existing alpha and includes a newly detected subject. The test page restricts this option to the 512 model. Each 512 refinement is sequential and its merged mask is at most 1024 × 1024 pixels; it does not load the 768 model. A tight crop around a missing object can recover it, but refinement cannot guarantee a good mask for every selected area.
-
-Keep the source image and `mask.data` separately. To preview, sample the mask at the canvas's *display* resolution and use it as alpha for the source image. `exportCutout()` allocates a canvas at the requested output size, scales the native mask to those coordinates, and multiplies existing image transparency. For a smaller PNG, it requests resized decoding from the browser; the browser may still need temporary memory to decode the original. The worker releases the decoded source bitmap after building the inference tensor, before ONNX inference; it prepares an optional centered retry crop before that release. A 6000 × 4000 source produces a 512 × 512 or 768 × 768 mask, depending on the model, with an explicit full-source coordinate mapping. Upscaling a mask cannot recover edge detail absent from inference. Large final PNG exports may require substantially more memory than normal segmentation.
-
-## iPhone 16 results
-
-Safari ran the 512 model on several photos. A fresh 768 run with the built-in sample, preview off, and no PNG export returned to **Ready** from `running-model`. The connected Mac Console recorded `com.apple.WebKit.WebContent` killed by jetsam for `per-process-limit` at 16:23:32 on 2026-10-01. This rules out the source photo and PNG export as necessary causes of that failure. Keep 768 off the iPhone 16 path. A 512 run on the large skeleton photo followed by **Up to 8 MP** PNG export completed on the same device. This validates that particular reduced export, not every source or a full-resolution export.
-
-The 512 crop refinement passed Chrome checks and was then tried on iPhone 16 Safari with the existing skeleton, skater, cyclist, and soccer images. **Add Subject** recovered the skater's board, cyclist detail, and soccer ball in the saved iPhone exports. The skeleton's `22/42/56/43` **Replace detail** crop was applied, but its ribs and internal gaps still looked poor; a targeted retest changed little. These are individual device results, not a full mobile reliability run. The saved iPhone outputs and screenshots are under `img-tests/outputs/iphone16-refined-512/`.
-
-After the decoded-bitmap lifetime change, one fresh Safari tab completed boat-8 with preview and an 8 MP PNG, skeleton with preview and an 8 MP PNG, hamburger, and repeat boat-8 and skeleton runs without a reload or error. The saved boat and skeleton PNGs are byte-identical to the earlier iPhone exports; the same WebContent process handled the sequence. Console still reported memory pressure and sampled resident memory up to about 1.68 GB. This confirms output stability for the sequence, **not** a reduced peak-memory measurement or broad iPhone reliability.
-
-## Review and benchmark
-
-### Beta-readiness assessment
-
-For the first pop-up beta, assess two things separately. **Reliability:** the supported 512 path must complete cold starts and repeated image, preview, and up-to-8-MP export runs on the target browsers without a tab reload or invalid output; over-limit and corrupt inputs must report errors. **Visual utility:** review at the pop-up's intended display size, with the intended subject recorded before processing. Mark each image as usable automatically, usable after one explicit refinement, or unusable; record blank/wrong-subject outputs and essential missing parts separately, and report counts for each advertised subject type. The broad-scope beta gate is at least 81/90 usable automatic cutouts overall and at least 12/15 in each advertised group on one frozen, unseen 90-photo set, with no silent blank PNG or browser crash. Explicit no-subject errors count as quality misses. Assisted results are reported separately. This is a product threshold for the first pop-up, not an industry standard; do not revise it after viewing the qualification outputs.
-
-### Proposed 512 beta quality scope
-
-The proposed automatic beta claim is a **single visually dominant foreground subject** in a JPEG, PNG, or WebP within the documented input limits: people, animals, road/air vehicles, boats, flowers, and discrete physical objects such as chairs or instruments. Evaluate at the intended website display size. Keep an essential held item with its person when it is part of the intended subject. A mask is unusable if the main subject is blank, an essential part is missing, or a large unrelated background fragment remains.
-
-Treat multi-object interactions and small detached props (for example a distant ball), scene-wide subjects (skyline or landscape), dense foliage trees, flames/smoke, and fine transparent or wispy structures as **experimental**. The library accepts those photos, but the automatic beta claim does not promise a clean result for them. Some examples work; the 75-photo review shows that performance is inconsistent. The crop refinement is an optional assisted operation and is measured separately from automatic quality.
-
-Before changing the model or reviewing another set, record each new image's intended subject and category. For this broad-scope qualification, we froze **90 unseen Commons photos: 15 each** of people, animals, road/air vehicles, boats, flowers, and discrete objects. The beta gate above applies to the next frozen set. Assisted rescues, limits, and invalid outputs are reported separately; difficult photos remain in the denominator.
-
-The local exploratory 75-photo 512 review (`img-tests/outputs/outputs-beta-512/results.md`, ignored by Git) currently has **65/73 usable automatic exports**, eight material misses, and two photos rejected above the 40 MP input cap. A targeted Add crop rescued the missing baseball in a separate assisted pass; the other seven misses were not rescued by the tested crops. This set informs the scope and cannot also serve as the unseen qualification set.
-
-The fresh 100-photo 512 holdout (`img-tests/outputs/outputs-beta-holdout-512/results.md`, ignored by Git) produced 96 correctly sized RGBA PNGs and four expected rejections above 40 MP. Two images were exact copies of earlier beta photos, and four partial/multi-subject compositions were declared exploratory before inference. Among the remaining 90 accepted, unseen, in-scope photos, **85/90 (94.4%) automatic cutouts were usable** at display size. This clears the 90% rate but does not by itself establish beta readiness: `boat-8` was wholly blank. Four other material misses retained a scratching post, cup reflection, or opponent, or lost a held racket head. `plane-8`, predeclared exploratory, was also wholly blank. No assisted results were counted. This viewed set cannot be reused as a fresh holdout after a fix.
-
-The subsequent empty-mask fallback retries a centered crop with the same 512 model, and accepts it only when at least 2% of its mask pixels contain a subject. `boat-8` was zero before export; the cropped inference produced a usable yacht cutout. A 16-image targeted retest retained byte-identical PNGs for 14 previously nonblank holdout cases, including the four other material misses. It also recovered an older blank wet-floor sign; `plane-8` remained blank. This is a regression check on viewed images, not a new holdout qualification. An iPhone 16 Safari retest of `boat-8` then completed segmentation and an 8 MP PNG export (2529×3162). Its alpha matched the desktop cutout after scaling (mean absolute difference 0.04/255), but WebContent reported memory pressure during the successful run at about 1.59 GB sampled resident memory. The fallback works on that phone; memory headroom remains a beta risk. Retest files and details are in the holdout results document.
-
-A second independent 41-photo set was declared from source-only previews before inference and run through the current 512 build on Chrome. All 41 inputs produced correctly sized RGBA PNGs, but only **33/41 (80.5%)** automatic cutouts were usable at display size; one rusted car was wholly blank. Four of five sailboats were material misses, alongside a low-contrast flower, an ornate chair with background furniture, and a seated person with rock attached. This fails the provisional automatic targets and shows a material weakness for boats; it does not by itself define the first application's beta decision. Separate hand-selected Add crops recovered two sailboats and the rusted car, but those rescues do not count toward automatic quality. The per-image record (`img-tests/outputs/outputs-beta-holdout-2-512/results.md`) and source set are local and ignored by Git.
-
-Broad-scope research on that viewed set tested two official upstream checkpoints without changing the shipped library. IS-Net general-use at 512 recovered the blank car and more sailboat detail, but its 41-photo comparison also degraded previously good people and animals and retained background branches and furniture; it is not a safe direct replacement. A 4.7 MB U²-Net-P saliency model found useful crop regions for the blank car and two nearly blank boats. Passing those fixed-rule regions to the existing 512 `refine(..., "add")` recovered those **three** cutouts and preserved a small-airplane control, but a lifted boat still included its crane and other misses remained. If this locator path transferred perfectly to the library, the viewed set would rise only to **36/41 (87.8%)**, still below the earlier provisional 90% target. A simpler quadrant crop selected a ruined building instead of the car. These are local pilots, not automatic library results or an unseen qualification. The locator's official checkpoint has a pinned SHA-256 (`e7567cde013fb64813973ce6e1ecc25a80c05c3ca7adbc5a54f3c3d90991b854`), and its ONNX export passed native numeric comparison and one Chrome WASM run, but the checkpoint's own redistribution terms and iPhone memory behavior still need qualification before bundling it. The upstream [U²-Net](https://github.com/xuebinqin/U-2-Net) and [IS-Net](https://github.com/xuebinqin/DIS) repositories license their code under Apache-2.0; neither research checkpoint was added to this package.
-
-Two more candidates were checked against the same viewed failures, without changing the library. The official MIT [BiRefNet_lite-2K](https://huggingface.co/ZhengPeng7/BiRefNet_lite-2K) checkpoint (revision `3f789d2ba403e2ee59ce08ee9250d4c1c590b418`, SHA-256 `aa2e4a5af5eb3904694feb40f2b39ec5dd7cd9110906590cfeb982f09a46021d`) produced empty masks on 14/16 miss-and-control photos at 512 in native PyTorch. Its documented 2560 × 1440 input is incompatible with the current iPhone 512 memory budget, so it is not a replacement candidate. The official Apache-2.0 [MobileSAM](https://github.com/ChaoningZhang/MobileSAM) includes its 38.8 MB checkpoint in the licensed repository (revision `f706ad9c4eb7f219c00d9050e46328518ffb65d2`, SHA-256 `6dbb90523a35330fedd7f1d3dfc66f995213d81b29a5ca8108dbcdd4e37d6c2f`). Native inference with manually drawn boxes recovered a clean car, sailboats, and most of the ornate chair and flower; a positive and negative click largely separated the person from the rock but retained some background fragments. This establishes a possible **assisted** route only: no MobileSAM ONNX export, current-browser compatibility, or iPhone memory test has been completed, and user-supplied prompts cannot count toward the automatic quality result.
-
-The 512 build now rejects empty-mask PNG exports explicitly. A new optional YOLOS-Tiny boat/car locator runs only when a mask covers less than 3% of pixels; it accepts a detected crop only when the result substantially adds subject area. On the viewed 41-photo regression set, the rusted car and two sailboats became usable, while 37 PNGs were byte identical; the sunset boat and crane scene remain misses. The fixed 90-photo Commons holdout then scored **74/90 usable automatic cutouts**, with **87 valid PNGs and three explicit no-subject errors**. This misses the provisional **81/90 overall** target from the release plan. People 12/15, animals 14/15, boats 12/15, flowers 15/15, and discrete objects 12/15 met the provisional per-group target; vehicles **9/15** did not. The per-image review is local at `img-tests/outputs/outputs-beta-holdout-3-512/results.md` and Git-ignored. This set is now viewed and cannot qualify a later fix as unseen.
-
-The current tarball installed and imported in a separate temporary consumer project. Its packed worker, WASM runtime, both model manifests, and the car-rescue path passed a browser smoke check; export geometry, malformed-input, batch, and repeated-inference checks also passed. On iPhone 16, an initial regular-tab run returned the old empty car and hull-only sailboat masks, while hamburger and an 8 MP skeleton PNG exported. The test page now fetches the manifest without cache and exposes locator stages. A fresh Safari Private tab applied the locator rescue to both car and sailboat and exported correctly sized PNGs; mean alpha differences from desktop were 0.11/255 and 0.34/255. This points to stale cached assets in the initial tab, though that tab did not expose enough stages to identify which asset. The October 7 repeated-use run in one iPhone Safari tab exported five valid cutouts (hamburger, skeleton, a white SUV, Boat 8, and the sailboat fixture) without a reload or error. The repeated hamburger, skeleton, Boat 8, and sailboat masks matched earlier iPhone exports exactly. Console recorded WebContent memory-pressure warnings and sampled roughly 1.5 GB resident memory, but no `per-process-limit` termination; these samples are not a peak-memory measurement. This completes the mobile acceptance check. Hosts should deploy matching library, worker, manifest, and model versions together and use versioned asset URLs. The broad-scope visual target remains unmet, so the package stays private and has not been tagged for beta release.
-
-The next locator revision tries up to two distinct, confident car/boat detector boxes in substantial-area order when the initial mask is sparse. Diagnostics showed that `vehicles-01` had no usable detector box, `vehicles-03` produced a weak segmentation crop, and four other vehicle misses already had substantial but wrong or incomplete masks. For boats, this change recovered the previously near-blank `boats-15`; `boats-04` gained a boat but still included its neighbor, and the non-sparse `boats-05` remains outside this fallback. All 41 PNGs in the viewed locator regression set were pixel-identical to the prior build. Among sparse cases in the earlier viewed 90-photo set, four other outputs were unchanged and two explicit no-subject errors stayed explicit. This candidate can perform a second crop inference on a sparse image, so the previous iPhone acceptance result does not qualify this new candidate's repeated-use memory behavior.
-
-A fourth, frozen 90-photo [Wikimedia Commons](https://commons.wikimedia.org/wiki/Commons:API/MediaWiki) set was selected from source previews, with subject intent and source metadata recorded before inference (`img-tests/photosets/photoset-beta-holdout-4/intent.md`, Git-ignored). The first Chrome 512 run scored **67/90 usable automatic cutouts**, with people 9/15, animals 11/15, vehicles 12/15, boats 10/15, flowers 13/15, and objects 12/15. Chrome completed all 90 attempts without a tab crash: 87 outputs were readable RGBA PNGs with correct dimensions, and three were explicit no-subject errors. The locked **81/90 overall and 12/15 per-group** gate fails. The per-image record is `img-tests/outputs/outputs-beta-holdout-4-512/results.md` (Git-ignored). This set is now viewed and cannot qualify a later fix as unseen. The broad automatic promise needs a stronger way to select the intended subject in ambiguous scenes and improve the segmentation model's missed parts; the two-box locator alone does not solve those failures.
-
-The first frozen **desktop one-click** qualification set scored **80/90 usable**, failing the unchanged overall and people gates. A diagnosed person-locator class-index error was then fixed, and a second, previously unseen 90-photo set scored **81/90 usable** with every group at or above 12/15. It passes the locked beta quality gate exactly. Chrome completed all 90 attempts without a reload, producing 89 valid PNGs and one explicit no-subject error. A separate 20-photo large-image one-click sequence produced 19 valid PNGs and one explicit no-subject error, without a reload. The release decision, candidate comparisons, borderline cases, and local per-image evidence are recorded in [BETA_RELEASE.md](BETA_RELEASE.md).
-
-The user's local 50-photo 512 review (`img-tests/outputs/outputs-1/results.md`, ignored by Git) recorded 50/50 PNGs opening with correct geometry, but 13/50 images failed at least one placement or transparency axis. Failures cluster around ambiguous scenes and skylines, thin or complex structures, motion, and disconnected objects such as the skater's board and soccer ball. The provisional gate of 45/50 acceptable cutouts is therefore not met; the review did not assign separate 0–2 quality scores.
-
-An earlier three-way Mac benchmark ran the same 50 photos in separate headless Chrome sessions: weBG 512, weBG 768, and IMG.LY 1.7.0 medium on CPU. Warm full-PNG medians were 4.93 s, 10.60 s, and 8.90 s respectively, with zero execution failures. These are local processing times, not network download times; the models differ, and no equivalent IMG.LY run was made on the iPhone. IMG.LY recovered the skyline and soccer ball missed by weBG, while its cutouts also had visible defects on some photos. The comparison's per-image quality scores remain unfilled.
-
-## Reproduce the candidate model
-
-The export uses the official [BiRefNet_lite weights](https://huggingface.co/ZhengPeng7/BiRefNet_lite) at the revision in the manifest, checks their hash, converts the deformable convolution to standard ONNX operators, and checks both the patched PyTorch network and ONNX output against the original network. The model card labels the weights MIT. The export script uses upstream model code only as an export-time input. Read and review that pinned source before running it because Transformers loads its custom Python code.
+**Model availability:** Neither ONNX file is in Git or the npm tarball, and no public prebuilt download is available yet. The existing, Git-ignored local bundle at `release/v0.1.0-beta.1/models/` has the exact previously tested files for this workspace. For a fresh source checkout, reproduce and verify them with the pinned export process:
 
 ```sh
 python3.11 -m venv .venv
 .venv/bin/pip install -r scripts/requirements-export.txt
 .venv/bin/python scripts/export_birefnet_lite.py
+.venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="hustvl/yolos-tiny", revision="1a00cc14a139ff40bac9aa00c745915cb7b5b751", allow_patterns=["model.safetensors", "config.json", "preprocessor_config.json"], local_dir=".venv/yolos-tiny-source")'
+.venv/bin/python scripts/export_yolos_tiny.py .venv/yolos-tiny-source models/yolos-tiny-416.onnx
 npm run verify:model
-.venv/bin/python scripts/export_birefnet_lite.py --size 768 --output models/birefnet-lite-768.onnx
-npm run verify:model -- models/birefnet-lite-768.json
 ```
 
-Export tools are not browser dependencies. Direct tool versions and the source revision are pinned; the script validates numeric equivalence and writes the final hash. A second export in the same environment produced the identical SHA-256. Re-exporting under a different Python/platform environment may change ONNX bytes, so compare the generated manifest and browser behavior before distributing a replacement binary.
+Verification requires BiRefNet_lite 512 SHA-256 `eba7f32d81b4ea697334d467f44d373094633f3dd02eeb000e5f592510f79164` and YOLOS-Tiny SHA-256 `b12c56df09c905ae7ace9944b7981a88a20e2b9a006f1b052861b05c6e4362c1`. Re-exporting can produce different bytes in another Python environment; do not substitute a model that fails the hash check. A distribution for fresh tarball consumers still needs these two tested binaries published as versioned assets. The export loads pinned upstream Python model code; review it before running the commands. See `DEVELOPMENT.md` in the source checkout for more detail.
 
-For the 512 locator, download `model.safetensors`, `config.json`, and `preprocessor_config.json` from [YOLOS-Tiny revision `1a00cc1`](https://huggingface.co/hustvl/yolos-tiny/tree/1a00cc14a139ff40bac9aa00c745915cb7b5b751) into one local directory. The model repository labels its weights Apache-2.0. With the pinned export environment above, run `python scripts/export_yolos_tiny.py /path/to/source models/yolos-tiny-416.onnx`, then `npm run verify:model`. The script checks the source weight hash; the reproduced ONNX matched the locator manifest's SHA-256 in the current environment. The browser runtime does not depend on Python or Transformers.
+```js
+import { createSegmenter } from "/webg/dist/index.js";
 
-## Qualification still needed
+const manifest = await fetch("/models/birefnet-lite-512.json").then(response => response.json());
+const segmenter = createSegmenter({ model: manifest.runtime });
 
-The 512/768/1024 segmentation graphs and the YOLOS locator graph are fixed-shape and hash-pinned. The 1024 graph passes upstream numeric validation, but Chrome single-threaded WASM failed on the cyclist photo with `std::bad_alloc`; do not use it as a browser default. In a separate 50-photo browser batch on this Mac, 768 completed without errors and reduced entirely blank exports from eight to two. It still missed the city and river skylines and the soccer ball; the chain-link fence remained unusable. On the same bike photo in separate fresh Chrome instances, model initialization took 2.90 seconds at 512 and 2.94 seconds at 768; warm segmentation took 5.22 and 10.72 seconds respectively. The 768 batch's sampled summed Chrome process-tree RSS peaked at about 6.0 GiB, including possible double-counting of shared pages. These local timings do not include real network download latency. The iPhone 16 failure rules out 768 as a default there. WebGPU and threaded WASM remain separate qualifications; the latter requires cross-origin isolation.
+try {
+  const transparentPng = await segmenter.removeBackground(imageBlob);
+  // Use transparentPng in the editor.
+} finally {
+  segmenter.dispose();
+}
+```
 
-See [third-party notices](THIRD_PARTY_NOTICES.md) for the model and runtime licenses.
+Keep a segmenter alive across multiple images to reuse its loaded model session. Only one operation may run on that instance at a time. `removeBackground()` runs 512 inference and PNG export; the lower-level `segment()` and `exportCutout()` methods remain available when the editor needs a model-resolution soft mask. `initialize()` preloads the model. `dispose()` releases the worker.
+
+## Limits and output
+
+| Setting | Default |
+| --- | ---: |
+| Compressed input | 25 MiB |
+| Decoded source | 40 million pixels |
+| One-click PNG output | Up to 16 million pixels |
+
+The one-click method scales a larger source down to the output cap while preserving its aspect ratio. Pass `{ maxOutputPixels: 8_000_000 }` as the third argument to `removeBackground()` for a smaller PNG. `createSegmenter()` accepts `maxInputBytes`, `maxInputPixels`, and `maxExportPixels` if the host needs tighter limits. Image dimensions are checked before full decoding; invalid, truncated, and over-limit inputs reject with an error. An image with no detected subject rejects instead of yielding a silently blank PNG.
+
+The mask is one byte per pixel at the model's **512 × 512 resolution**, with explicit mapping to the source dimensions. Normal editing can use the source and mask separately. PNG export performs the larger RGBA allocation only when requested. Upscaling a mask cannot recover detail that the model did not infer.
+
+## Beta evidence and limitations
+
+The frozen desktop qualification scored **81/90 usable automatic cutouts**, exactly meeting the predeclared overall and per-category gates. One image returned an explicit no-subject error; other misses included missing thin parts, an incorrect foreground selection, and retained background. This selected photo set does not estimate success across arbitrary uploads. Chrome and Safari each completed a separate 20-photo repeated-use run without a reload: 19 valid PNGs and one explicit no-subject result.
+
+The source checkout keeps the quality decision in `BETA_RELEASE.md`, the full text-only per-image record in `QUALIFICATION.md`, timing measurements in `PERFORMANCE.md`, and development instructions in `DEVELOPMENT.md`. Development photo sets, output PNGs, and local release binaries are Git-ignored; tests and research notes are excluded from the npm tarball.
+
+## Attribution
+
+This beta uses ONNX Runtime Web (MIT), BiRefNet_lite model weights (MIT), and YOLOS-Tiny model weights (Apache 2.0). The applicable copyright and license text is in [LICENSES.md](LICENSES.md).

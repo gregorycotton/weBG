@@ -1,4 +1,4 @@
-# Third-party notices
+# Third-party licenses
 
 The official [BiRefNet_lite model repository](https://huggingface.co/ZhengPeng7/BiRefNet_lite) labels its weights MIT. Its [upstream code license](https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE) is MIT. The [YOLOS-Tiny model repository](https://huggingface.co/hustvl/yolos-tiny) labels its weights Apache-2.0. The browser runtime, [ONNX Runtime Web](https://github.com/microsoft/onnxruntime/blob/main/LICENSE), is MIT. Both ONNX files were exported from pinned upstream weights; no community ONNX conversion is included.
 
@@ -255,3 +255,4 @@ The source model is published by HUST Vision Lab and marked Apache-2.0 in its mo
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+

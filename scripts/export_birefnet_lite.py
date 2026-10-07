@@ -161,6 +161,8 @@ def main():
         },
         "validation": {"deformMaxError": patch_error, "patchedMaxError": model_error, "onnxMaxError": onnx_error},
     }
+    if args.size == 512:
+        manifest["runtime"]["locatorUrl"] = "/models/yolos-tiny-416.onnx"
     args.output.with_suffix(".json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"Exported {args.output} ({args.output.stat().st_size:,} bytes)", flush=True)
 
