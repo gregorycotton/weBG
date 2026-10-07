@@ -84,6 +84,13 @@
       if (String(mask.data) !== "0,255,255,255" || mask.sourceWidth !== 2 || mask.sourceHeight !== 2) throw new Error(`Unexpected result: ${[...mask.data]}`);
       const inferredCutout = await exportedPixels(await segmenter.exportCutout(image, mask));
       check(inferredCutout.data[3] === 0 && inferredCutout.data[7] === 255 && inferredCutout.data[11] === 0, "Inferred mask export failed");
+      const oneClick = await exportedPixels(await segmenter.removeBackground(image));
+      check(oneClick.width === inferredCutout.width && oneClick.height === inferredCutout.height && oneClick.data.every((value, index) => value === inferredCutout.data[index]), "One-call removal differs from segment plus export");
+      const oneClickLimit = createSegmenter({ model, maxExportPixels: 2 });
+      try {
+        const reducedOneClick = await exportedPixels(await oneClickLimit.removeBackground(image));
+        check(reducedOneClick.width * reducedOneClick.height <= 2, "One-call removal did not honor the export cap");
+      } finally { oneClickLimit.dispose(); }
       const again = await segmenter.segment(image);
       if (String(again.data) !== String(mask.data)) throw new Error("Repeated inference changed the mask");
       const smallSubjectCanvas = document.createElement("canvas");

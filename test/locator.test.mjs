@@ -12,9 +12,19 @@ test("locator offers distinct substantial boxes and ignores uncertain boxes", ()
   logits[92 + 91] = 0; logits[92 + 9] = 0.7; // Lower-confidence but much larger boat.
   boxes.set([0.5, 0.5, 0.4, 0.5], 4);
   assert.deepEqual(locateWeakSubjects(logits, boxes, 1000, 800), [
-    { x: 240, y: 140, width: 520, height: 520 },
-    { x: 385, y: 348, width: 130, height: 104 },
+    { region: { x: 240, y: 140, width: 520, height: 520 }, person: false },
+    { region: { x: 385, y: 348, width: 130, height: 104 }, person: false },
   ]);
   logits[9] = -10; logits[92 + 9] = -10;
+  assert.deepEqual(locateWeakSubjects(logits, boxes, 1000, 800), []);
+  logits[0] = 4; // COCO class 0 is N/A, not person.
+  assert.deepEqual(locateWeakSubjects(logits, boxes, 1000, 800), []);
+  logits[0] = -10;
+  logits[1] = 4;
+  boxes.set([0.5, 0.5, 0.2, 0.4], 0);
+  assert.deepEqual(locateWeakSubjects(logits, boxes, 1000, 800), [
+    { region: { x: 370, y: 192, width: 260, height: 416 }, person: true },
+  ]);
+  logits[1] = 2;
   assert.deepEqual(locateWeakSubjects(logits, boxes, 1000, 800), []);
 });

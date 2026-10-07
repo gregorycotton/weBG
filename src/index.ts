@@ -14,6 +14,7 @@ export interface ExportOptions { maxOutputPixels?: number }
 export interface Segmenter {
   initialize(onProgress?: (stage: string) => void): Promise<void>;
   segment(image: Blob, onProgress?: (stage: string) => void): Promise<Mask>;
+  removeBackground(image: Blob, onProgress?: (stage: string) => void, options?: ExportOptions): Promise<Blob>;
   refine(image: Blob, mask: Mask, region: Rect, mode: RefineMode, onProgress?: (stage: string) => void): Promise<Mask>;
   exportCutout(image: Blob, mask: Mask, onProgress?: (stage: string) => void, options?: ExportOptions): Promise<Blob>;
   dispose(): void;
@@ -101,6 +102,10 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
       if (reply.type !== "done") throw new Error("Segmentation worker returned an unexpected response.");
       return reply.mask;
     },
+    async removeBackground(image, onProgress, options) {
+      const mask = await this.segment(image, onProgress);
+      return this.exportCutout(image, mask, onProgress, { maxOutputPixels: options?.maxOutputPixels ?? maxExportPixels });
+    },
     async refine(image, mask, region, mode, onProgress) {
       validateImage(image);
       validateMask(mask);
@@ -116,7 +121,7 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
     async exportCutout(image, mask, onProgress, options) {
       validateImage(image);
       validateMask(mask);
-      if (!mask.subjectBounds.width || !mask.subjectBounds.height || !mask.data.some(alpha => alpha >= 16)) throw new Error("No subject found in mask; refine it before exporting.");
+      if (!mask.subjectBounds.width || !mask.subjectBounds.height || !mask.data.some(alpha => alpha >= 16)) throw new Error("No subject found in mask.");
       const maxOutputPixels = options?.maxOutputPixels;
       if (maxOutputPixels !== undefined && (!Number.isSafeInteger(maxOutputPixels) || maxOutputPixels <= 0)) throw new Error("maxOutputPixels must be a positive integer.");
       const outputPixels = Math.min(mask.sourceWidth * mask.sourceHeight, maxOutputPixels ?? Number.MAX_SAFE_INTEGER);

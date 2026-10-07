@@ -2,13 +2,15 @@
 
 Standalone, browser-side image segmentation library. It returns a soft, one-byte-per-pixel subject mask and the mapping back to the source image. The browser editor is not part of this package.
 
+The first beta is a **one-click laptop/desktop** background remover; see [the frozen release decision and qualification result](BETA_RELEASE.md). Mobile and manual refinement are outside that first product promise.
+
 The reference backend is single-threaded ONNX Runtime Web WASM. The runtime and model are self-hosted, with no IMG.LY dependency. Image bytes are processed in a worker; the library does not upload them.
 
 ## Current status
 
 - Working browser path: inspect JPEG, PNG, or WebP dimensions before decode; resize to the model's fixed input; run WASM inference; return a soft alpha mask and subject bounds in source coordinates. An optional PNG export applies the mask to the original image.
 - Model candidates: our fixed-shape 512, 768, and 1024 FP32 ONNX exports of the same official BiRefNet_lite weights. The 512 model remains the default and ran on an iPhone 16. The 768 model completed a 50-photo Chrome batch but exceeded the iPhone Safari WebContent memory limit even on the built-in sample; do not use it on that device. The 1024 model failed during Chrome WASM inference with `std::bad_alloc` and is not a supported browser option.
-- Each model manifest records the source revision, upstream and exported SHA-256 hashes, license, export method, tool versions, and tensor shapes. The 512 runtime optionally uses our Apache-2.0-labeled YOLOS-Tiny export to locate boats and cars when its initial mask is sparse. Its manifest is included in the local npm tarball. Both `.onnx` files are excluded from Git and the npm package; host them as separate static assets.
+- Each model manifest records the source revision, upstream and exported SHA-256 hashes, license, export method, tool versions, and tensor shapes. The 512 runtime optionally uses our Apache-2.0-labeled YOLOS-Tiny export to locate people, boats, and cars when its initial mask is sparse. Its manifest is included in the local npm tarball. Both `.onnx` files are excluded from Git and the npm package; host them as separate static assets.
 - This is a functional baseline, not yet a qualified replacement for every IMG.LY image. The 512 review found 13/50 images with at least one failed review axis; the 768 review still has scene-selection and disconnected-subject failures. On iPhone 16, 512 segmentation worked on several photos and an up-to-8-MP export of the large skeleton photo completed. An earlier full-size export of that 39.5-megapixel photo reloaded Safari; the current 16-million-pixel export limit now rejects it before decoding.
 
 ## Build and try it
@@ -35,25 +37,22 @@ If a binary is missing, generate it as described below. `npm run verify:model` c
 
 ## API
 
+For a one-click desktop editor, pass the selected image `Blob` to `removeBackground()` and use the returned transparent PNG `Blob`. A no-subject result rejects with an error; it never returns a silently blank PNG. Keep one segmenter alive across photos to reuse the model session. This first beta path does not require a subject-selection or refinement UI.
+
 ```js
 import { createSegmenter } from "/dist/index.js";
 
 const manifest = await fetch("/models/birefnet-lite-512.json").then(r => r.json());
 const segmenter = createSegmenter({ model: manifest.runtime });
 try {
-  const mask = await segmenter.segment(imageBlob, stage => console.log(stage));
-  // mask.data: row-major Uint8Array of soft alpha, mask.width × mask.height.
-  // mask.sourceWidth/sourceHeight: original decoded image dimensions.
-  // mask.subjectBounds: source-coordinate rectangle; empty means no subject.
-  if (!mask.subjectBounds.width) throw new Error("No subject found; select a region and refine.");
-  // Omit the fourth argument for a full-size PNG when the source is at most 16 MP.
-  const pngBlob = await segmenter.exportCutout(imageBlob, mask, undefined, { maxOutputPixels: 8_000_000 });
+  const pngBlob = await segmenter.removeBackground(imageBlob, undefined, { maxOutputPixels: 8_000_000 });
+  // Insert pngBlob into the editor or create an object URL for display.
 } finally {
   segmenter.dispose();
 }
 ```
 
-Reuse one segmenter for multiple images to reuse its loaded session. Only one operation may run on a segmenter at a time; a concurrent call rejects. `initialize()` can preload the model. `exportCutout()` can also use a previously saved mask without loading the model; it rejects empty masks instead of writing a blank PNG. `dispose()` terminates its worker and rejects in-flight work. The default input limits are 25 MiB compressed and 40 million decoded pixels; pass `maxInputBytes` or `maxInputPixels` to tighten them. Full-size PNG export has a separate 16-million-pixel limit, configurable with `maxExportPixels` in `createSegmenter()`. A per-call `maxOutputPixels` scales the output within that limit while preserving the source aspect ratio. JPEG, PNG, and WebP dimensions are checked from the file header before full decode. Invalid, truncated, oversized, and mismatched mask inputs raise an error. Model files must be same-origin.
+`removeBackground()` is the convenience form of `segment()` followed by `exportCutout()`; callers can still use those two operations when they need a native-resolution mask. The mask contains row-major, soft `Uint8Array` alpha and an explicit source-coordinate mapping. Only one operation may run on a segmenter at a time; a concurrent call rejects. `initialize()` can preload the model. `exportCutout()` can also use a previously saved mask without loading the model; it rejects empty masks instead of writing a blank PNG. `dispose()` terminates its worker and rejects in-flight work. The default input limits are 25 MiB compressed and 40 million decoded pixels; pass `maxInputBytes` or `maxInputPixels` to tighten them. Full-size PNG export has a separate 16-million-pixel limit, configurable with `maxExportPixels` in `createSegmenter()`. The one-click method automatically scales larger images to that limit; pass a lower per-call `maxOutputPixels` to request a smaller PNG. The sample above sets an 8 MP cap. JPEG, PNG, and WebP dimensions are checked from the file header before full decode. Invalid, truncated, oversized, and mismatched mask inputs raise an error. Model files must be same-origin.
 
 `segmenter.refine(imageBlob, mask, selectedRegion, "replace" | "add")` makes one more inference with the segmenter's configured model on an explicitly selected source-pixel rectangle, then returns a new mask. The original mask stays unchanged. `replace` blends local detail into that rectangle; `add` preserves existing alpha and includes a newly detected subject. The test page restricts this option to the 512 model. Each 512 refinement is sequential and its merged mask is at most 1024 × 1024 pixels; it does not load the 768 model. A tight crop around a missing object can recover it, but refinement cannot guarantee a good mask for every selected area.
 
@@ -100,6 +99,8 @@ The current tarball installed and imported in a separate temporary consumer proj
 The next locator revision tries up to two distinct, confident car/boat detector boxes in substantial-area order when the initial mask is sparse. Diagnostics showed that `vehicles-01` had no usable detector box, `vehicles-03` produced a weak segmentation crop, and four other vehicle misses already had substantial but wrong or incomplete masks. For boats, this change recovered the previously near-blank `boats-15`; `boats-04` gained a boat but still included its neighbor, and the non-sparse `boats-05` remains outside this fallback. All 41 PNGs in the viewed locator regression set were pixel-identical to the prior build. Among sparse cases in the earlier viewed 90-photo set, four other outputs were unchanged and two explicit no-subject errors stayed explicit. This candidate can perform a second crop inference on a sparse image, so the previous iPhone acceptance result does not qualify this new candidate's repeated-use memory behavior.
 
 A fourth, frozen 90-photo [Wikimedia Commons](https://commons.wikimedia.org/wiki/Commons:API/MediaWiki) set was selected from source previews, with subject intent and source metadata recorded before inference (`img-tests/photosets/photoset-beta-holdout-4/intent.md`, Git-ignored). The first Chrome 512 run scored **67/90 usable automatic cutouts**, with people 9/15, animals 11/15, vehicles 12/15, boats 10/15, flowers 13/15, and objects 12/15. Chrome completed all 90 attempts without a tab crash: 87 outputs were readable RGBA PNGs with correct dimensions, and three were explicit no-subject errors. The locked **81/90 overall and 12/15 per-group** gate fails. The per-image record is `img-tests/outputs/outputs-beta-holdout-4-512/results.md` (Git-ignored). This set is now viewed and cannot qualify a later fix as unseen. The broad automatic promise needs a stronger way to select the intended subject in ambiguous scenes and improve the segmentation model's missed parts; the two-box locator alone does not solve those failures.
+
+The first frozen **desktop one-click** qualification set scored **80/90 usable**, failing the unchanged overall and people gates. A diagnosed person-locator class-index error was then fixed, and a second, previously unseen 90-photo set scored **81/90 usable** with every group at or above 12/15. It passes the locked beta quality gate exactly. Chrome completed all 90 attempts without a reload, producing 89 valid PNGs and one explicit no-subject error. A separate 20-photo large-image one-click sequence produced 19 valid PNGs and one explicit no-subject error, without a reload. The release decision, candidate comparisons, borderline cases, and local per-image evidence are recorded in [BETA_RELEASE.md](BETA_RELEASE.md).
 
 The user's local 50-photo 512 review (`img-tests/outputs/outputs-1/results.md`, ignored by Git) recorded 50/50 PNGs opening with correct geometry, but 13/50 images failed at least one placement or transparency axis. Failures cluster around ambiguous scenes and skylines, thin or complex structures, motion, and disconnected objects such as the skater's board and soccer ball. The provisional gate of 45/50 acceptable cutouts is therefore not met; the review did not assign separate 0–2 quality scores.
 
