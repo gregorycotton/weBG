@@ -4,8 +4,9 @@ weBG is a browser-side, one-click background remover for JPEG, PNG, and WebP ima
 
 The supported photo has one visually dominant person, animal, vehicle, boat, flower, or discrete object. Automatic selection of a detached ball, skateboard, second subject, or whole landscape is outside this beta's promise. Mobile browsers and manual refinement are not qualified for this release.
 
-
 ![Original photo beside the automatic transparent cutout](docs/weBG-README.png)
+
+Truthfully this was created for my own personal use in another project... so it is limited/tailored to my needs.
 
 ## Use it
 

@@ -14,7 +14,7 @@ These rules are fixed **before** the next unseen set is run. Select 90 new Wikim
 
 Score the first automatic 512 result at 512-pixel display size, with no crop refinement, manual prompts, or per-photo retries. A result is usable when the intended subject is substantially intact and recognizable, including essential attached parts, without a large opaque patch of unrelated background or another equally prominent subject. Minor edge softness is acceptable. A blank mask, explicit no-subject error, wrong subject, essential missing part, or material background fragment is a miss. Publish each image's result and reason for a miss in a text-only qualification record.
 
-The product quality gate is **at least 81/90 usable results overall and at least 12/15 in each group**. This is our release decision threshold, not an industry standard. Do not change it after the run or generate another qualification set to replace an unfavorable result. The 512 candidate must also complete all 90 attempts without a browser crash, and must never silently produce a blank PNG. Each successful PNG must decode with the expected aspect ratio and nonzero alpha.
+The product quality gate is **at least 81/90 usable results overall and at least 12/15 in each group**. Do not change it after the run or generate another qualification set to replace an unfavorable result. The 512 candidate must also complete all 90 attempts without a browser crash, and must never silently produce a blank PNG. Each successful PNG must decode with the expected aspect ratio and nonzero alpha.
 
 ## Desktop acceptance and release
 
@@ -28,7 +28,7 @@ Keep the self-exported, hash-pinned BiRefNet_lite 512 plus the sparse-mask car/b
 
 The earlier MobileSAM experiment required a person to draw a box, which the first editor will not ask users to do. An automatic detector can propose boxes for some photos, but when two people, boats, or objects are similarly prominent it cannot reliably infer which the user meant. Such scenes remain outside the stated single-dominant-subject promise. All model comparisons above were on viewed development images; they are not qualification scores.
 
-## Frozen desktop result (October 2026)
+## Frozen desktop result (October 7th 2026)
 
 The 90 Commons sources were frozen with intended subjects, source pages, stated licenses, and local hashes in `img-tests/photosets/photoset-beta-desktop-5/intent.md` before inference. The unchanged 512 candidate produced **80/90 usable automatic cutouts**: people 11/15, animals 14/15, vehicles 14/15, boats 13/15, flowers 14/15, and objects 14/15. The 81/90 overall and 12/15 people gates both failed. Chrome completed all 90 attempts without a reload; 89 yielded correctly sized, nonblank RGBA PNGs, and one returned an explicit no-subject error. The per-image results and reasons are in `img-tests/outputs/outputs-beta-desktop-5-512/results.md` (Git-ignored). This set became viewed development evidence, so that candidate was not tagged.
 
@@ -36,7 +36,7 @@ A separate Chrome one-click repeated-use run on 20 already viewed large photos (
 
 After the frozen score, a browser regression exposed a YOLOS class-index mistake in a provisional person-locator experiment: the upstream model labels `person` as class 1, not class 0. The corrected detector now proposes and applies crops on two viewed person failures. A Chrome rerun changed exactly those two alpha masks; 87 other PNGs were pixel identical and the explicit no-subject case remained. The recovered walking woman is usable. Replacing the original sparse mask for a confident person crop also removed the residual railing from the silhouetted skater; the skater is recognizable, though the tiny skateboard edge remains uncertain. The previously passing Boat 8 rescue stayed byte identical. This was a **new development candidate**, not part of the frozen 80/90 result, and required a new unseen qualification set under the same rules.
 
-## Qualified candidate (October 2026)
+## Qualified candidate (October 7th 2026)
 
 For that corrected candidate, a second 90-photo Wikimedia Commons set was chosen from source previews and frozen **before** inference. Its intended subjects, source pages, stated licenses, image hashes, and exact library and model asset hashes were recorded in `img-tests/photosets/photoset-beta-desktop-6/intent.md` before the run. The first Chrome run scored **81/90 usable**, exactly meeting the unchanged overall gate; the groups scored people 15/15, animals 13/15, vehicles 12/15, boats 12/15, flowers 15/15, and objects 14/15. All 90 attempts completed in one tab: 89 nonblank, correctly sized PNGs and one explicit no-subject error, with no reload or silently blank export. The [tracked qualification record](QUALIFICATION.md) lists all 90 sources, intended subjects, scores, observations, and source/output hashes without storing the images. The original photos and PNGs remain local and Git-ignored; the text record does not by itself permit a visual review of the output edges.
 
