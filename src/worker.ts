@@ -1,6 +1,6 @@
 import * as ort from "onnxruntime-web/wasm";
 import { imageDimensions } from "./image";
-import { locateWeakSubject } from "./locator";
+import { locateWeakSubjects } from "./locator";
 import { mergeRefinement, outputToMask, pixelsToTensor, type Mask, type ModelConfig, type Rect, type RefineMode } from "./mask";
 
 type Request =
@@ -76,8 +76,8 @@ async function inferRegion(image: Blob, region: Rect): Promise<Mask> {
   return infer(bitmap, region.width, region.height);
 }
 
-async function locate(image: Blob, sourceWidth: number, sourceHeight: number): Promise<Rect | undefined> {
-  if (!model?.locatorUrl) return;
+async function locate(image: Blob, sourceWidth: number, sourceHeight: number): Promise<Rect[]> {
+  if (!model?.locatorUrl) return [];
   self.postMessage({ type: "progress", stage: "locating-subject" });
   const bitmap = await createImageBitmap(image, { resizeWidth: 416, resizeHeight: 416 });
   let input: ort.Tensor;
@@ -95,7 +95,7 @@ async function locate(image: Blob, sourceWidth: number, sourceHeight: number): P
     try {
       const logits = result.logits?.data, boxes = result.pred_boxes?.data;
       if (!(logits instanceof Float32Array) || !(boxes instanceof Float32Array)) throw new Error("Locator output does not match its configuration.");
-      return locateWeakSubject(logits, boxes, sourceWidth, sourceHeight);
+      return locateWeakSubjects(logits, boxes, sourceWidth, sourceHeight);
     } finally { for (const output of Object.values(result)) output.dispose(); }
   } finally { input.dispose(); await locator?.release(); }
 }
@@ -199,18 +199,18 @@ self.onmessage = async (event: MessageEvent<Request>) => {
       let occupied = 0;
       for (const alpha of mask.data) if (alpha >= 16) occupied++;
       if (model.locatorUrl && occupied < mask.data.length * 0.03) {
-        let located: Rect | undefined;
+        let located: Rect[] = [];
         try {
           located = await locate(request.image, sourceWidth, sourceHeight);
-          if (!located) self.postMessage({ type: "progress", stage: "locator-no-match" });
+          if (!located.length) self.postMessage({ type: "progress", stage: "locator-no-match" });
         }
         catch (error) {
           self.postMessage({ type: "progress", stage: `locator-failed: ${error instanceof Error ? error.message : String(error)}` });
         }
-        if (located) {
-          self.postMessage({ type: "progress", stage: `locator-found: ${JSON.stringify(located)}` });
+        for (const region of located) {
+          self.postMessage({ type: "progress", stage: `locator-found: ${JSON.stringify(region)}` });
           let detail: Mask | undefined;
-          try { detail = await inferRegion(request.image, located); }
+          try { detail = await inferRegion(request.image, region); }
           catch (error) {
             self.postMessage({ type: "progress", stage: `locator-crop-failed: ${error instanceof Error ? error.message : String(error)}` });
           }
@@ -218,12 +218,13 @@ self.onmessage = async (event: MessageEvent<Request>) => {
             let strong = 0;
             for (const alpha of detail.data) if (alpha >= 16) strong++;
             if (strong >= detail.data.length * 0.02) {
-              const merged = mergeRefinement(mask, detail, located, "add");
+              const merged = mergeRefinement(mask, detail, region, "add");
               let rescued = 0;
               for (const alpha of merged.data) if (alpha >= 16) rescued++;
               if (rescued > occupied * 2 && rescued >= merged.data.length * 0.005) {
                 mask = merged;
                 self.postMessage({ type: "progress", stage: "locator-rescue-applied" });
+                break;
               } else self.postMessage({ type: "progress", stage: "locator-rescue-rejected" });
             } else self.postMessage({ type: "progress", stage: "locator-crop-weak" });
           }

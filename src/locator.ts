@@ -1,9 +1,8 @@
 import type { Rect } from "./mask";
 
 // YOLOS COCO classes: car=3, boat=9. Only these known weak cases trigger automatic rescue.
-export function locateWeakSubject(logits: Float32Array, boxes: Float32Array, width: number, height: number): Rect | undefined {
+export function locateWeakSubjects(logits: Float32Array, boxes: Float32Array, width: number, height: number): Rect[] {
   if (logits.length !== 100 * 92 || boxes.length !== 100 * 4) throw new Error("Locator output has an unexpected shape.");
-  let bestScore = 0;
   const candidates: { score: number; box: number[] }[] = [];
   for (let i = 0; i < 100; i++) {
     const offset = i * 92;
@@ -14,18 +13,26 @@ export function locateWeakSubject(logits: Float32Array, boxes: Float32Array, wid
     const boat = Math.exp(logits[offset + 9] - largest) / total;
     const score = Math.max(car, boat);
     if (!Number.isFinite(score)) throw new Error("Locator output contains a non-finite value.");
-    bestScore = Math.max(bestScore, score);
-    candidates.push({ score, box: Array.from(boxes.subarray(i * 4, i * 4 + 4)) });
+    const box = Array.from(boxes.subarray(i * 4, i * 4 + 4));
+    if (score >= 0.6 && box.every(Number.isFinite) && box[2] > 0 && box[3] > 0) candidates.push({ score, box });
   }
-  if (bestScore < 0.7) return;
-  const chosen = candidates.filter(candidate => candidate.score >= Math.max(0.7, bestScore - 0.08))
-    .sort((a, b) => b.box[2] * b.box[3] - a.box[2] * a.box[3])[0];
-  const [cx, cy, bw, bh] = chosen.box;
-  if (![cx, cy, bw, bh].every(Number.isFinite) || bw <= 0 || bh <= 0) return;
-  const x = Math.max(0, Math.round((cx - bw * 0.65) * width));
-  const y = Math.max(0, Math.round((cy - bh * 0.65) * height));
-  const right = Math.min(width, Math.round((cx + bw * 0.65) * width));
-  const bottom = Math.min(height, Math.round((cy + bh * 0.65) * height));
-  if (right - x < 16 || bottom - y < 16) return;
-  return { x, y, width: right - x, height: bottom - y };
+  const regions: Rect[] = [];
+  for (const candidate of candidates.sort((a, b) => b.score * b.box[2] * b.box[3] - a.score * a.box[2] * a.box[3])) {
+    const [cx, cy, bw, bh] = candidate.box;
+    const x = Math.max(0, Math.round((cx - bw * 0.65) * width));
+    const y = Math.max(0, Math.round((cy - bh * 0.65) * height));
+    const right = Math.min(width, Math.round((cx + bw * 0.65) * width));
+    const bottom = Math.min(height, Math.round((cy + bh * 0.65) * height));
+    if (right - x < 16 || bottom - y < 16) continue;
+    const region = { x, y, width: right - x, height: bottom - y };
+    if (regions.some(previous => {
+      const overlap = Math.max(0, Math.min(right, previous.x + previous.width) - Math.max(x, previous.x))
+        * Math.max(0, Math.min(bottom, previous.y + previous.height) - Math.max(y, previous.y));
+      return overlap / (region.width * region.height + previous.width * previous.height - overlap) > 0.8;
+    })) continue;
+    regions.push(region);
+    // TODO: A third crop could recover more scenes but costs another 512 inference on mobile.
+    if (regions.length === 2) break;
+  }
+  return regions;
 }
