@@ -25,7 +25,7 @@ Install the local beta tarball to obtain the library files, then copy its `dist/
 
 Keep `worker.js` and the WASM files adjacent to `index.js`. Deploy the library build, manifests, and ONNX files as one versioned set so a cached worker or manifest cannot be mixed with another model version.
 
-**Model availability:** Neither ONNX file is in Git or the npm tarball, and no public prebuilt download is available yet. The existing, Git-ignored local bundle at `release/v0.1.0-beta.1/models/` has the exact previously tested files for this workspace. For a fresh source checkout, reproduce and verify them with the pinned export process:
+**Model availability:** Neither ONNX file is in Git or the npm tarball, and no public prebuilt download is available yet. The Git-ignored local bundle at `release/v0.1.0-beta.2/models/` has the exact tested files for this workspace. For a fresh source checkout, reproduce and verify them with the pinned export process:
 
 ```sh
 python3.11 -m venv .venv
