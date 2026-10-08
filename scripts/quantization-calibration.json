@@ -1,0 +1,74 @@
+[
+  {
+    "name": "people-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Person_in_winter_clothing_in_Quebec_City.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e7/Person_in_winter_clothing_in_Quebec_City.jpg/960px-Person_in_winter_clothing_in_Quebec_City.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "188b0999602a299cd84f8cb1d51f9d5d10b3f77a4fea9f400acb1e74fc1076e5"
+  },
+  {
+    "name": "people-02.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Steve_Rodriguez_(skateboarder)_2019_Battle_at_the_Beach_-_Far_Rockaway_Skatepark,_Queens,_NY_(cropped).jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/75/Steve_Rodriguez_%28skateboarder%29_2019_Battle_at_the_Beach_-_Far_Rockaway_Skatepark%2C_Queens%2C_NY_%28cropped%29.jpg/960px-Steve_Rodriguez_%28skateboarder%29_2019_Battle_at_the_Beach_-_Far_Rockaway_Skatepark%2C_Queens%2C_NY_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "264e3feb77a4b7f5f46f071dda15464f446a235a4d38d17051fbc9be7ebb2fcc"
+  },
+  {
+    "name": "animals-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Gun_dog_running_on_grass.JPG",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/07/Gun_dog_running_on_grass.JPG/960px-Gun_dog_running_on_grass.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "5fb349badb476ed0f89453d4f8cd11a0583aef27191d8f698e34b55a174a6fc4"
+  },
+  {
+    "name": "animals-02.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Austrailian_shepherd_dog_running_in_the_snow.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f3/Austrailian_shepherd_dog_running_in_the_snow.jpg/960px-Austrailian_shepherd_dog_running_in_the_snow.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "bb0f8c88a13e92415a97f579594d5fe1f254aca7d5d94f32d1a33191f4e7c994"
+  },
+  {
+    "name": "vehicles-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Musdale_road_and_parked_car_-_geograph.org.uk_-_4717184.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/83/Musdale_road_and_parked_car_-_geograph.org.uk_-_4717184.jpg/960px-Musdale_road_and_parked_car_-_geograph.org.uk_-_4717184.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "49df163a91332c4a120128a9ad2dbb4376ba84f70c4c6ec6b293e6fb9856f9b3"
+  },
+  {
+    "name": "vehicles-02.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Gate_and_Parked_Car_near_Roceven_-_geograph.org.uk_-_5012510.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/Gate_and_Parked_Car_near_Roceven_-_geograph.org.uk_-_5012510.jpg/960px-Gate_and_Parked_Car_near_Roceven_-_geograph.org.uk_-_5012510.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "3ffb6280e09cdd69971d3a905afbc1d543c8c8131e255c46d9edffd3a830ee1f"
+  },
+  {
+    "name": "boats-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Hunter_386_sailboat_0559.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/52/Hunter_386_sailboat_0559.jpg/960px-Hunter_386_sailboat_0559.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "7cbc6f0219a39677fd511347e6431bed3a6c5c4af598c972328bab36d9ee48aa"
+  },
+  {
+    "name": "boats-02.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Dragon_wooden_sailboat_1709.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8f/Dragon_wooden_sailboat_1709.jpg/960px-Dragon_wooden_sailboat_1709.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "d01b1cf4cee7eaf3a74914fd6a09a8b7702a26cad5ff3ad15823eed75c784973"
+  },
+  {
+    "name": "flowers-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Rose_flower_at_the_Lalbaghgarden_Bangalore.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d0/Rose_flower_at_the_Lalbaghgarden_Bangalore.jpg/960px-Rose_flower_at_the_Lalbaghgarden_Bangalore.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "b4fe40d7a43c6b0ab5c888b6734966e161084ad9508e113e18d725d1df9851e7"
+  },
+  {
+    "name": "flowers-02.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Red_Rose_Flower_IITMandi_Himachal_Aug19_D72_11473.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5b/Red_Rose_Flower_IITMandi_Himachal_Aug19_D72_11473.jpg/960px-Red_Rose_Flower_IITMandi_Himachal_Aug19_D72_11473.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "f582dd66b91fe48d738202f32f605727a03b4edd6b579e019e8bb5aff556abb9"
+  },
+  {
+    "name": "objects-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Wooden_chair_with_12_steel_blades,_China_Wellcome_L0058390.jpg",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9e/Wooden_chair_with_12_steel_blades%2C_China_Wellcome_L0058390.jpg/960px-Wooden_chair_with_12_steel_blades%2C_China_Wellcome_L0058390.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "ddf7b9ae3b8f7b88613b31eb3b453d7ce7530e95681a5b2975ec4746bf579cd5"
+  },
+  {
+    "name": "objects-02.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Hout_bay_museum_wooden_chair_2.JPG",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/23/Hout_bay_museum_wooden_chair_2.JPG/960px-Hout_bay_museum_wooden_chair_2.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "sha256": "fed2febcb0c5d0b07339867dc9ebe3d9ea30b7f8f291c4c74e0e3d8d8689731c"
+  }
+]

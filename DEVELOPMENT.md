@@ -29,16 +29,17 @@ npm run batch -- /path/to/photos /path/to/outputs models/birefnet-lite-512.json
 
 ## Model reproduction
 
-The 512 BiRefNet_lite and YOLOS-Tiny manifests pin upstream revisions, source weight SHA-256, export tools, ONNX SHA-256, and tensor shapes. Export tools are development dependencies only. The BiRefNet export uses official weights and checks its patched PyTorch network and ONNX output against the original network. Review the pinned upstream custom Python code before running it.
+The 512 BiRefNet_lite and YOLOS-Tiny manifests pin upstream revisions, source weight SHA-256, export tools, ONNX SHA-256, and tensor shapes. The active 512 segmentation model stores per-channel uint8 Conv/MatMul weights while keeping activations FP32; its quantization script downloads 12 SHA-256-pinned Commons thumbnails listed in `scripts/quantization-calibration.json`. Export tools are development dependencies only. The BiRefNet export uses official weights and checks its patched PyTorch network and ONNX output against the original network. Review the pinned upstream custom Python code before running it.
 
 ```sh
 python3.11 -m venv .venv
 .venv/bin/pip install -r scripts/requirements-export.txt
 .venv/bin/python scripts/export_birefnet_lite.py
+.venv/bin/python scripts/quantize_birefnet_lite.py --source models/birefnet-lite-512-fp32.onnx --output models/birefnet-lite-512.onnx
 npm run verify:model
 ```
 
-For the locator, obtain `model.safetensors`, `config.json`, and `preprocessor_config.json` from the revision recorded in `models/yolos-tiny-416.json`, then run `python scripts/export_yolos_tiny.py /path/to/source models/yolos-tiny-416.onnx`. The script checks the source weight hash. Both 512 ONNX files reproduced the manifest hashes in the current export environment; a different environment may produce different bytes and needs browser validation.
+For the locator, obtain `model.safetensors`, `config.json`, and `preprocessor_config.json` from the revision recorded in `models/yolos-tiny-416.json`, then run `python scripts/export_yolos_tiny.py /path/to/source models/yolos-tiny-416.onnx`. The script checks the source weight hash. The active 512 quantized ONNX and locator reproduced their manifest hashes in the current export environment; a different environment may produce different bytes and needs browser validation.
 
 The 768 and 1024 manifests and exports remain for research. The 768 graph is slower and previously exceeded the iPhone 16 Safari WebContent limit. The 1024 graph passed export validation but failed desktop Chrome WASM inference with `std::bad_alloc`. Neither is part of the beta bundle.
 

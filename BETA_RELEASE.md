@@ -58,3 +58,15 @@ The beta package is `webg@0.1.0-beta.2`. It remains `UNLICENSED`, and its npm ma
 | `models/yolos-tiny-416.onnx` | `b12c56df09c905ae7ace9944b7981a88a20e2b9a006f1b052861b05c6e4362c1` |
 
 The PNG and model limitations above remain part of the beta contract. Integration into the browser editor is separate work and has not been started here.
+
+## Weight-only uint8 successor candidate (October 8th 2026)
+
+The browser release model was re-exported from the same pinned MIT-licensed BiRefNet_lite weights, then quantized to per-channel uint8 Conv/MatMul weights with FP32 activations. Its 12 Commons calibration thumbnails are downloaded and SHA-256-verified by `scripts/quantize_birefnet_lite.py`; a clean download reproduced the exact candidate SHA-256 `72446f88aacb13f0f3dfd17d653cc34c427adc465fbd76097742e87b64f3fdd7`. The model remains 512 × 512 and uses the unchanged YOLOS locator. The ONNX shrank from 183.8 MB to 54.1 MB (gzip 164.8 MB to 41.7 MB). Full activation-and-weight uint8 was rejected because it slowed inference and introduced new misses.
+
+A new 90-photo Commons set was selected from source thumbnails and frozen with intended subjects and hashes before inference. The first Chrome run scored **85/90 usable**: people 14/15, animals 15/15, vehicles 15/15, boats 12/15, flowers 14/15, objects 15/15. All 90 attempts finished in one tab without a reload; 89 produced valid nonblank RGBA PNGs and one returned an explicit no-subject error. The five misses remain in the denominator. The [text-only per-image record](QUALIFICATION_BETA3.md) gives sources, scores, reasons, and hashes; local photos and PNGs are Git-ignored. The same set under FP32 had the same explicit error, and no material new miss was found in the quantized outputs. This selected set supports the stated single-dominant-subject promise, not arbitrary photographs.
+
+Three fresh Chrome profiles per model and photo showed a roughly 30–34% lower sampled browser-process RSS sum with uint8 weights. Six paired photos ran about 1.5% slower after warm loading; the substantial model download and memory reduction justifies this small CPU cost for the desktop beta. RSS sums may double-count shared mappings. See [PERFORMANCE.md](PERFORMANCE.md).
+
+This change prepares `webg@0.1.0-beta.3` locally. It does not alter the already published beta.2 GitHub assets. Run the release preparation and isolated consumer check before tagging or publishing beta.3.
+
+The uint8 build then completed the 20-photo mixed-size repeated-use sequence in desktop Chrome, Playwright WebKit, and actual Safari. Each produced 19 valid PNGs and one explicit no-subject error for the cyclist. No page reloaded; actual Safari had one page load. This is a reliability check on viewed photos, not a second quality score. A separate `boat-pov.jpg` comparison showed that Chrome produced poor masks under **both** FP32 and uint8, while WebKit's locator fallback recovered the boat under both. Quantization changed the extent of the Chrome miss but did not introduce that browser-specific failure.

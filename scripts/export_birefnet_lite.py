@@ -74,7 +74,7 @@ class FinalLogits(torch.nn.Module):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-dir", type=Path, help="Pinned upstream snapshot; downloaded if omitted")
-    parser.add_argument("--output", type=Path, default=Path("models/birefnet-lite-512.onnx"))
+    parser.add_argument("--output", type=Path, default=Path("models/birefnet-lite-512-fp32.onnx"))
     parser.add_argument("--size", type=int, default=512)
     args = parser.parse_args()
     if args.size < 128 or args.size % 32:

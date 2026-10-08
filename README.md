@@ -12,7 +12,7 @@ The release assets are publicly downloadable, but weBG's original code remains `
 
 ## Use it
 
-Download the [versioned browser bundle](https://github.com/gregorycotton/weBG/releases/download/v0.1.0-beta.2/webg-0.1.0-beta.2-browser.tar.gz) and unpack it into your site's static root. It contains the library and both tested ONNX files. Serve the extracted `webg/` and `models/` directories on the **same origin** as the page. The example below imports the hosted copy of `index.js`; it does not use a bundler's bare `webg` import. The paths are:
+Download the matching browser bundle from [GitHub releases](https://github.com/gregorycotton/weBG/releases) and unpack it into your site's static root. The bundle for this checkout is named `webg-0.1.0-beta.3-browser.tar.gz` when published. It contains the library and both tested ONNX files. Serve the extracted `webg/` and `models/` directories on the **same origin** as the page. The example below imports the hosted copy of `index.js`; it does not use a bundler's bare `webg` import. The paths are:
 
 ```text
 /webg/dist/index.js
@@ -27,14 +27,15 @@ Download the [versioned browser bundle](https://github.com/gregorycotton/weBG/re
 
 Keep `worker.js` and the WASM files adjacent to `index.js`. Deploy the library build, manifests, and ONNX files as one versioned set so a cached worker or manifest cannot be mixed with another model version.
 
-For npm consumers, the same release also provides [`webg-0.1.0-beta.2.tgz`](https://github.com/gregorycotton/weBG/releases/download/v0.1.0-beta.2/webg-0.1.0-beta.2.tgz). It contains `dist/` and the manifests; host the ONNX files from the browser bundle alongside it. Installing the GitHub source repository directly is not supported because built files and ONNX assets are Git-ignored.
+For npm consumers, the matching release also provides `webg-0.1.0-beta.3.tgz`. It contains `dist/` and the manifests; host the ONNX files from the browser bundle alongside it. Installing the GitHub source repository directly is not supported because built files and ONNX assets are Git-ignored.
 
-**Model provenance:** The browser bundle includes the exact tested binaries. Their SHA-256 values are BiRefNet_lite 512 `eba7f32d81b4ea697334d467f44d373094633f3dd02eeb000e5f592510f79164` and YOLOS-Tiny `b12c56df09c905ae7ace9944b7981a88a20e2b9a006f1b052861b05c6e4362c1`. A source checkout can reproduce and verify them with the pinned export process:
+**Model provenance:** The browser bundle for this checkout includes the exact tested binaries. Their SHA-256 values are BiRefNet_lite 512 uint8-weights `72446f88aacb13f0f3dfd17d653cc34c427adc465fbd76097742e87b64f3fdd7` and YOLOS-Tiny `b12c56df09c905ae7ace9944b7981a88a20e2b9a006f1b052861b05c6e4362c1`. A source checkout can reproduce and verify them with the pinned export process:
 
 ```sh
 python3.11 -m venv .venv
 .venv/bin/pip install -r scripts/requirements-export.txt
 .venv/bin/python scripts/export_birefnet_lite.py
+.venv/bin/python scripts/quantize_birefnet_lite.py --source models/birefnet-lite-512-fp32.onnx --output models/birefnet-lite-512.onnx
 .venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="hustvl/yolos-tiny", revision="1a00cc14a139ff40bac9aa00c745915cb7b5b751", allow_patterns=["model.safetensors", "config.json", "preprocessor_config.json"], local_dir=".venv/yolos-tiny-source")'
 .venv/bin/python scripts/export_yolos_tiny.py .venv/yolos-tiny-source models/yolos-tiny-416.onnx
 npm run verify:model
@@ -72,9 +73,9 @@ The mask is one byte per pixel at the model's **512 × 512 resolution**, with ex
 
 ## Beta evidence and limitations
 
-The frozen desktop qualification scored **81/90 usable automatic cutouts**, exactly meeting the predeclared overall and per-category gates. One image returned an explicit no-subject error; other misses included missing thin parts, an incorrect foreground selection, and retained background. This selected photo set does not estimate success across arbitrary uploads. Chrome and Safari each completed a separate 20-photo repeated-use run without a reload: 19 valid PNGs and one explicit no-subject result.
+The weight-only uint8 build scored **85/90 usable automatic cutouts** on a newly frozen Commons set, meeting the predeclared overall and per-category gates. The previous FP32 beta scored 81/90 on its own set. One boat returned an explicit no-subject error; other misses included two more boats, a poppy missing most petals, and an unwanted second player. This selected photo set does not estimate success across arbitrary uploads. With the uint8 model, Chrome, Playwright WebKit, and actual Safari each completed a separate 20-photo large-image sequence without a reload: 19 valid PNGs and one explicit no-subject result. That sequence checked execution reliability, not cutout quality.
 
-The source checkout keeps the quality decision in `BETA_RELEASE.md`, the full text-only per-image record in `QUALIFICATION.md`, timing measurements in `PERFORMANCE.md`, and development instructions in `DEVELOPMENT.md`. Development photo sets, output PNGs, and local release binaries are Git-ignored; tests and research notes are excluded from the npm tarball.
+The source checkout keeps the quality decision in `BETA_RELEASE.md`, this build's full text-only per-image record in `QUALIFICATION_BETA3.md` (and the earlier FP32 record in `QUALIFICATION.md`), timing measurements in `PERFORMANCE.md`, and development instructions in `DEVELOPMENT.md`. Development photo sets, output PNGs, and local release binaries are Git-ignored; tests and research notes are excluded from the npm tarball.
 
 ## Attribution
 
