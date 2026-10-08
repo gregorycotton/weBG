@@ -8,9 +8,11 @@ The supported photo has one visually dominant person, animal, vehicle, boat, flo
 
 Truthfully this was created for my own personal use in another project... so it is limited/tailored to my needs.
 
+The release assets are publicly downloadable, but weBG's original code remains `UNLICENSED`. The third-party runtime and models retain their separate licenses below.
+
 ## Use it
 
-Install the local beta tarball to obtain the library files, then copy its `dist/` directory and two model manifests from `node_modules/webg/` into your site's static assets. The example below imports that **hosted copy** of `index.js`; it does not use a bundler's bare `webg` import. Host the two ONNX files separately on the **same origin** as the page. Use these paths, or adjust the manifest URLs for your host:
+Download the [versioned browser bundle](https://github.com/gregorycotton/weBG/releases/download/v0.1.0-beta.2/webg-0.1.0-beta.2-browser.tar.gz) and unpack it into your site's static root. It contains the library and both tested ONNX files. Serve the extracted `webg/` and `models/` directories on the **same origin** as the page. The example below imports the hosted copy of `index.js`; it does not use a bundler's bare `webg` import. The paths are:
 
 ```text
 /webg/dist/index.js
@@ -25,7 +27,9 @@ Install the local beta tarball to obtain the library files, then copy its `dist/
 
 Keep `worker.js` and the WASM files adjacent to `index.js`. Deploy the library build, manifests, and ONNX files as one versioned set so a cached worker or manifest cannot be mixed with another model version.
 
-**Model availability:** Neither ONNX file is in Git or the npm tarball, and no public prebuilt download is available yet. The Git-ignored local bundle at `release/v0.1.0-beta.2/models/` has the exact tested files for this workspace. For a fresh source checkout, reproduce and verify them with the pinned export process:
+For npm consumers, the same release also provides [`webg-0.1.0-beta.2.tgz`](https://github.com/gregorycotton/weBG/releases/download/v0.1.0-beta.2/webg-0.1.0-beta.2.tgz). It contains `dist/` and the manifests; host the ONNX files from the browser bundle alongside it. Installing the GitHub source repository directly is not supported because built files and ONNX assets are Git-ignored.
+
+**Model provenance:** The browser bundle includes the exact tested binaries. Their SHA-256 values are BiRefNet_lite 512 `eba7f32d81b4ea697334d467f44d373094633f3dd02eeb000e5f592510f79164` and YOLOS-Tiny `b12c56df09c905ae7ace9944b7981a88a20e2b9a006f1b052861b05c6e4362c1`. A source checkout can reproduce and verify them with the pinned export process:
 
 ```sh
 python3.11 -m venv .venv
@@ -36,7 +40,7 @@ python3.11 -m venv .venv
 npm run verify:model
 ```
 
-Verification requires BiRefNet_lite 512 SHA-256 `eba7f32d81b4ea697334d467f44d373094633f3dd02eeb000e5f592510f79164` and YOLOS-Tiny SHA-256 `b12c56df09c905ae7ace9944b7981a88a20e2b9a006f1b052861b05c6e4362c1`. Re-exporting can produce different bytes in another Python environment; do not substitute a model that fails the hash check. A distribution for fresh tarball consumers still needs these two tested binaries published as versioned assets. The export loads pinned upstream Python model code; review it before running the commands. See `DEVELOPMENT.md` in the source checkout for more detail.
+Re-exporting can produce different bytes in another Python environment; do not substitute a model that fails the hash check. The export loads pinned upstream Python model code; review it before running the commands. See `DEVELOPMENT.md` in the source checkout for more detail.
 
 ```js
 import { createSegmenter } from "/webg/dist/index.js";

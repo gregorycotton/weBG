@@ -42,6 +42,10 @@ For the locator, obtain `model.safetensors`, `config.json`, and `preprocessor_co
 
 The 768 and 1024 manifests and exports remain for research. The 768 graph is slower and previously exceeded the iPhone 16 Safari WebContent limit. The 1024 graph passed export validation but failed desktop Chrome WASM inference with `std::bad_alloc`. Neither is part of the beta bundle.
 
+## Release check
+
+Run `npm run release:prepare` to build the package and create `release/v<version>/webg-<version>-browser.tar.gz` plus the npm tarball and checksums. The browser archive contains only packaged library files and the two hash-verified model assets. Run `npm run release:check` to unpack that browser archive into a temporary directory, verify both ONNX hashes, and complete one Chrome background removal using the image included in the archive. The check serves no files from the source tree or the Git-ignored local model directory. Publish both tarballs and `SHA256SUMS` as versioned release assets only after this check passes.
+
 ## History
 
 The earlier 50-photo, 75-photo, holdout, iPhone, and model-pilot reviews are summarized in `BETA_RELEASE.md` and `PERFORMANCE.md`; their per-image records live under ignored `img-tests/outputs/`. Those viewed sets are regression material, not unseen qualification sets for a changed candidate.
